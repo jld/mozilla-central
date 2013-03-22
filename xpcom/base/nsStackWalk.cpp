@@ -1124,7 +1124,11 @@ FramePointerStackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
   int32_t skip = aSkipFrames;
   uint32_t numFrames = 0;
   while (1) {
+#if defined(HAVE_APCS_FRAME)
+    void **next = (void**)(bp[-3]);
+#else
     void **next = (void**)*bp;
+#endif
     // bp may not be a frame pointer on i386 if code was compiled with
     // -fomit-frame-pointer, so do some sanity checks.
     // (bp should be a frame pointer on ppc(64) but checking anyway may help
@@ -1140,7 +1144,11 @@ FramePointerStackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
     // ppc mac or powerpc64 linux
     void *pc = *(bp+2);
     bp += 3;
-#else // i386 or powerpc32 linux
+#elif defined(HAVE_APCS_FRAME)
+    // ARM Procedure Call Standard frame pointers
+    void *pc = *(bp-1);
+#else
+    // i386 or powerpc32 linux
     void *pc = *(bp+1);
     bp += 2;
 #endif
@@ -1166,7 +1174,9 @@ FramePointerStackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
 }
 
 #define X86_OR_PPC (defined(__i386) || defined(PPC) || defined(__ppc__))
-#if X86_OR_PPC && (NSSTACKWALK_SUPPORTS_MACOSX || NSSTACKWALK_SUPPORTS_LINUX) // i386 or PPC Linux or Mac stackwalking code
+#if (X86_OR_PPC || defined(HAVE_APCS_FRAME)) && \
+  (NSSTACKWALK_SUPPORTS_MACOSX || NSSTACKWALK_SUPPORTS_LINUX)
+// i386 or PPC (or ARM with frame pointers) Linux or Mac stackwalking
 
 EXPORT_XPCOM_API(nsresult)
 NS_StackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
@@ -1179,7 +1189,9 @@ NS_StackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
 
   // Get the frame pointer
   void **bp;
-#if defined(__i386) 
+#if defined(HAVE_APCS_FRAME)
+  __asm__( "mov %0, fp" : "=r"(bp));
+#elif defined(__i386)
   __asm__( "movl %%ebp, %0" : "=g"(bp));
 #else
   // It would be nice if this worked uniformly, but at least on i386 and

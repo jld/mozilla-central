@@ -52,7 +52,7 @@
  #include <execinfo.h>
 #endif
 
-#if defined(MOZ_PROFILING) && (defined(XP_MACOSX) || defined(XP_WIN))
+#if defined(MOZ_PROFILING) && (defined(XP_MACOSX) || defined(XP_WIN) || defined(HAVE_APCS_FRAME))
  #define USE_NS_STACKWALK
 #endif
 #ifdef USE_NS_STACKWALK
@@ -383,8 +383,9 @@ void StackWalkCallback(void* aPC, void* aSP, void* aClosure)
 
 void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample)
 {
-#ifndef XP_MACOSX
-  uintptr_t thread = GetThreadHandle(aSample->threadProfile->GetPlatformData());
+  uintptr_t thread = 0;
+#ifdef XP_WIN
+  thread = GetThreadHandle(aSample->threadProfile->GetPlatformData());
   MOZ_ASSERT(thread);
 #endif
   void* pc_array[1000];
