@@ -1191,6 +1191,11 @@ NS_StackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
   void *stackEnd;
 #if HAVE___LIBC_STACK_END
   stackEnd = __libc_stack_end;
+#elif defined(ANDROID)
+  extern void *__get_stack_base(int *pSize);
+  int stackSize;
+  stackEnd = __get_stack_base(&stackSize);
+  stackEnd += stackSize;
 #else
   stackEnd = reinterpret_cast<void*>(-1);
 #endif
