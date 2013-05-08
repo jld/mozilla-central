@@ -733,10 +733,13 @@ void StackWalkCallback(void* aPC, void* aSP, void* aClosure)
 void TableTicker::doBacktrace(ThreadProfile &aProfile, TickSample* aSample)
 {
   uintptr_t thread = 0;
-#ifdef XP_WIN
+#if defined(XP_WIN)
   thread = GetThreadHandle(platform_data());
   MOZ_ASSERT(thread);
+#elif defined(HAVE_APCS_FRAME)
+  thread = reinterpret_cast<uintptr_t>(aSample->fp);
 #endif
+
   void* pc_array[1000];
   void* sp_array[1000];
   PCArray array = {
@@ -749,12 +752,18 @@ void TableTicker::doBacktrace(ThreadProfile &aProfile, TickSample* aSample)
   // Start with the current function.
   StackWalkCallback(aSample->pc, aSample->sp, &array);
 
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX)
   pthread_t pt = GetProfiledThread(platform_data());
   void *stackEnd = reinterpret_cast<void*>(-1);
   if (pt)
     stackEnd = static_cast<char*>(pthread_get_stackaddr_np(pt));
   nsresult rv = FramePointerStackWalk(StackWalkCallback, 0, &array, reinterpret_cast<void**>(aSample->fp), stackEnd);
+#elif defined(HAVE_APCS_FRAME)
+  nsresult rv = NS_OK;
+  // Make sure our FP is valid, so NS_StackWalk doesn't segfault.
+  if (thread % 4 == 0 && aSample->fp >= aSample->sp + 12)
+    // NS_StackWalk will check against the end of the stack.
+    rv = NS_StackWalk(StackWalkCallback, 0, &array, thread);
 #else
   nsresult rv = NS_StackWalk(StackWalkCallback, 0, &array, thread);
 #endif

@@ -1138,27 +1138,30 @@ FramePointerStackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
 #define X86_OR_PPC (defined(__i386) || defined(PPC) || defined(__ppc__))
 #if (X86_OR_PPC || defined(HAVE_APCS_FRAME)) && \
   (NSSTACKWALK_SUPPORTS_MACOSX || NSSTACKWALK_SUPPORTS_LINUX)
-// i386 or PPC (or ARM with frame pointers) Linux or Mac stackwalking
-
+// i386 or PPC (or ARM with frame pointers) Linux or Mac stackwalking.
+// If aThread is non-zero, it is the frame pointer from which to trace.
 EXPORT_XPCOM_API(nsresult)
 NS_StackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
              void *aClosure, uintptr_t aThread)
 {
-  MOZ_ASSERT(!aThread);
   StackWalkInitCriticalAddress();
 
   // Get the frame pointer
   void **bp;
+  if (aThread != 0) {
+      bp = reinterpret_cast<void**>(aThread);
+  } else {
 #if defined(HAVE_APCS_FRAME)
-  __asm__( "mov %0, fp" : "=r"(bp));
+      __asm__( "mov %0, fp" : "=r"(bp));
 #elif defined(__i386)
-  __asm__( "movl %%ebp, %0" : "=g"(bp));
+      __asm__( "movl %%ebp, %0" : "=g"(bp));
 #else
-  // It would be nice if this worked uniformly, but at least on i386 and
-  // x86_64, it stopped working with gcc 4.1, because it points to the
-  // end of the saved registers instead of the start.
-  bp = (void**) __builtin_frame_address(0);
+      // It would be nice if this worked uniformly, but at least on i386 and
+      // x86_64, it stopped working with gcc 4.1, because it points to the
+      // end of the saved registers instead of the start.
+      bp = (void**) __builtin_frame_address(0);
 #endif
+  }
 
   void *stackEnd;
 #if HAVE___LIBC_STACK_END
@@ -1171,9 +1174,12 @@ NS_StackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
 #else
   stackEnd = reinterpret_cast<void*>(-1);
 #endif
+
+  if (bp >= stackEnd)
+    return NS_OK;
+
   return FramePointerStackWalk(aCallback, aSkipFrames,
                                aClosure, bp, stackEnd);
-
 }
 
 #elif defined(HAVE__UNWIND_BACKTRACE)
