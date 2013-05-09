@@ -945,9 +945,13 @@ void mozilla_sampler_init()
     return;
   }
 
-  const char* features = "js";
+  const char* features[] = {"js"
+#if defined(HAVE_APCS_FRAME)
+                         , "stackwalk"
+#endif
+  };
   mozilla_sampler_start(PROFILE_DEFAULT_ENTRY, PROFILE_DEFAULT_INTERVAL,
-                        &features, 1);
+                        features, ArrayLength(features));
 }
 
 void mozilla_sampler_deinit()
