@@ -298,7 +298,7 @@ void mozilla_sampler_init(void* stackTop)
 
   const char* features[] = {"js"
                          , "leaf"
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(HAVE_APCS_FRAME)
                          , "stackwalk"
 #endif
                          };
