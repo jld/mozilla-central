@@ -1145,7 +1145,8 @@ FramePointerStackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
     void *pc = *(bp+2);
     bp += 3;
 #elif defined(HAVE_APCS_FRAME)
-    // ARM Procedure Call Standard frame pointers
+    // Frame pointer variants of the ARM Procedure Call Standard.
+    // Uses only the saved FP and LR fields; ignores SP and PC.
     void *pc = *(bp-1);
 #else
     // i386 or powerpc32 linux
