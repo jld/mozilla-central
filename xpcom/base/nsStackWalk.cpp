@@ -40,6 +40,10 @@ static CriticalAddress gCriticalAddress;
     (defined(__sun) && \
      (defined(__sparc) || defined(sparc) || defined(__i386) || defined(i386)))
 
+#ifdef ANDROID
+#include <pthread.h>
+#endif
+
 #if NSSTACKWALK_SUPPORTS_MACOSX
 #include <pthread.h>
 #include <errno.h>
@@ -1208,10 +1212,18 @@ NS_StackWalk(NS_WalkStackCallback aCallback, uint32_t aSkipFrames,
 #if HAVE___LIBC_STACK_END
   stackEnd = __libc_stack_end;
 #elif defined(ANDROID)
-  extern void *__get_stack_base(int *pSize);
-  int stackSize;
-  stackEnd = __get_stack_base(&stackSize);
-  stackEnd += stackSize;
+  {
+    int rv;
+    pthread_attr_t threadAttr;
+    size_t stackSize;
+    rv = pthread_getattr_np(pthread_self(), &threadAttr);
+    if (rv != 0)
+      return NS_ERROR_FAILURE;
+    pthread_attr_getstack(&threadAttr, &stackEnd, &stackSize);
+    if (rv != 0)
+      return NS_ERROR_FAILURE;
+    stackEnd += stackSize;
+  }
 #else
   stackEnd = reinterpret_cast<void*>(-1);
 #endif
