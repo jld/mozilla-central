@@ -77,6 +77,10 @@ class BaselineFrame
     ArgumentsObject *argsObj_;      // If HAS_ARGS_OBJ, the arguments object.
     void *hookData_;                // If HAS_HOOK_DATA, debugger call hook data.
     uint32_t flags_;
+#ifdef HAVE_APCS_FRAME
+    uint32_t pad_;
+    uint32_t apcs_frame_[3];
+#endif
 
   public:
     // Distance between the frame pointer and the frame header (return address).
