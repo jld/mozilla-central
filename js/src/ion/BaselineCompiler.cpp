@@ -206,9 +206,17 @@ bool
 BaselineCompiler::emitPrologue()
 {
     masm.push(BaselineFrameReg);
+#ifdef HAVE_APCS_FRAME
+    masm.mov(BaselineStackReg, R0.scratchReg());
+    masm.subPtr(Imm32(BaselineFrame::Size()), BaselineStackReg);
+    masm.storePtr(r11, Address(BaselineStackReg, BaselineFrame::Size() - 12));
+    masm.storePtr(r14, Address(BaselineStackReg, BaselineFrame::Size() - 4));
+    masm.mov(R0.scratchReg(), BaselineFrameReg);
+#else
     masm.mov(BaselineStackReg, BaselineFrameReg);
 
     masm.subPtr(Imm32(BaselineFrame::Size()), BaselineStackReg);
+#endif
     masm.checkStackAlignment();
 
     // Initialize BaselineFrame. For eval scripts, the scope chain

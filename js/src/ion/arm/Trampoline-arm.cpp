@@ -239,8 +239,7 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         Register framePtr = r11;
         masm.subPtr(Imm32(BaselineFrame::Size()), sp);
 #ifdef HAVE_APCS_FRAME
-        masm.loadPtr(Address(sp, BaselineFrame::Size()), scratch);
-        masm.storePtr(scratch, Address(sp, BaselineFrame::Size() - 12));
+        masm.storePtr(framePtr, Address(sp, BaselineFrame::Size() - 12));
         masm.storePtr(lr, Address(sp, BaselineFrame::Size() - 4));
         aasm->as_add(framePtr, sp, Imm8(BaselineFrame::Size()));
 #else
