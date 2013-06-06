@@ -118,6 +118,9 @@ class Registers
     static const uint32_t NonAllocatableMask =
         (1 << Registers::sp) |
         (1 << Registers::r12) | // r12 = ip = scratch
+#ifdef HAVE_APCS_FRAME
+        (1 << Registers::r11) | // r11 = fp
+#endif
         (1 << Registers::lr) |
         (1 << Registers::pc);
 
