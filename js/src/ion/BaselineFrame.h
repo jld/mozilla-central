@@ -80,6 +80,10 @@ class BaselineFrame
 #ifdef HAVE_APCS_FRAME
     uint32_t pad_;
     uint32_t apcs_frame_[3];
+    // Ensure that this field is immediately under where the frame pointer points.
+    static void assertWrapper() {
+        JS_STATIC_ASSERT(offsetof(BaselineFrame, apcs_frame_) == sizeof(BaselineFrame) - 12);
+    }
 #endif
 
   public:

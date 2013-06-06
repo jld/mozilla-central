@@ -238,7 +238,14 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         // Reserve frame.
         Register framePtr = r11;
         masm.subPtr(Imm32(BaselineFrame::Size()), sp);
+#ifdef HAVE_APCS_FRAME
+        masm.loadPtr(Address(sp, BaselineFrame::Size()), scratch);
+        masm.storePtr(scratch, Address(sp, BaselineFrame::Size() - 12));
+        masm.storePtr(lr, Address(sp, BaselineFrame::Size() - 4));
+        aasm->as_add(framePtr, sp, Imm8(BaselineFrame::Size()));
+#else
         masm.mov(sp, framePtr);
+#endif
 
         // Reserve space for locals and stack values.
         masm.ma_lsl(Imm32(3), numStackValues, scratch);
@@ -255,7 +262,12 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         masm.push(r0); // jitcode
 
         masm.setupUnalignedABICall(3, scratch);
+#ifdef HAVE_APCS_FRAME
+        aasm->as_sub(scratch, framePtr, Imm8(BaselineFrame::Size()));
+        masm.passABIArg(scratch);
+#else
         masm.passABIArg(r11); // BaselineFrame
+#endif
         masm.passABIArg(OsrFrameReg); // StackFrame
         masm.passABIArg(numStackValues);
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, ion::InitBaselineFrameForOsr));
@@ -267,7 +279,9 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
 
         Label error;
         masm.addPtr(Imm32(IonExitFrameLayout::SizeWithFooter()), sp);
+#ifndef HAVE_APCS_FRAME
         masm.addPtr(Imm32(BaselineFrame::Size()), framePtr);
+#endif
         masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &error);
 
         masm.jump(jitcode);
