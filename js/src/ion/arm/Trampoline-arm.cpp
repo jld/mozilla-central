@@ -33,6 +33,10 @@ GenerateReturn(MacroAssembler &masm, int returnCode)
     masm.transferReg(r10);
     masm.transferReg(r11);
     // r12 isn't saved, so it shouldn't be restored.
+#ifdef HAVE_APCS_FRAME
+    // See EnterJITStack::r12, below.
+    masm.transferReg(r12);
+#endif
     masm.transferReg(pc);
     masm.finishDataTransfer();
     masm.dumpPool();
@@ -40,7 +44,9 @@ GenerateReturn(MacroAssembler &masm, int returnCode)
 
 struct EnterJITStack
 {
+#ifndef HAVE_APCS_FRAME
     void *r0; // alignment.
+#endif
 
     // non-volatile registers.
     void *r4;
@@ -52,6 +58,12 @@ struct EnterJITStack
     void *r10;
     void *r11;
     // The abi does not expect r12 (ip) to be preserved
+#ifdef HAVE_APCS_FRAME
+    // Save r12 here to leave r11 and r14 at the right offsets.
+    // Ideally it would be {fp,sp,lr,pc}, but Thumb2 won't allow
+    // sp and pc, and we don't need them anyway.
+    void *r12;
+#endif
     void *lr;
 
     // Arguments.
@@ -94,7 +106,10 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
     // rather than the JIT'd code, because they are scanned by the conservative
     // scanner.
     masm.startDataTransferM(IsStore, sp, DB, WriteBack);
+#ifndef HAVE_APCS_FRAME
     masm.transferReg(r0); // [sp,0]
+    // Otherwise, subtract 4 from the offsets below:
+#endif
     masm.transferReg(r4); // [sp,4]
     masm.transferReg(r5); // [sp,8]
     masm.transferReg(r6); // [sp,12]
@@ -104,6 +119,9 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
     masm.transferReg(r10); // [sp,28]
     masm.transferReg(r11); // [sp,32]
     // The abi does not expect r12 (ip) to be preserved
+#ifdef HAVE_APCS_FRAME
+    masm.transferReg(r12); // [sp,32]
+#endif
     masm.transferReg(lr);  // [sp,36]
     // The 5th argument is located at [sp, 40]
     masm.finishDataTransfer();
@@ -114,9 +132,13 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
     // Load calleeToken into r9.
     masm.loadPtr(slot_token, r9);
 
+#ifdef HAVE_APCS_FRAME
+    aasm->as_add(r11, sp, Imm8(40));
+#else
     // Save stack pointer.
     if (type == EnterJitBaseline)
         masm.movePtr(sp, r11);
+#endif
 
     // Load the number of actual arguments into r10.
     masm.loadPtr(slot_vp, r10);
@@ -180,7 +202,11 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         regs.take(r11);
         regs.take(ReturnReg);
 
+#ifdef HAVE_APCS_FRAME
+        const Address slot_numStackValues(r11, offsetof(EnterJITStack, numStackValues) - 40);
+#else
         const Address slot_numStackValues(r11, offsetof(EnterJITStack, numStackValues));
+#endif
 
         Label notOsr;
         masm.branchTestPtr(Assembler::Zero, OsrFrameReg, OsrFrameReg, &notOsr);
@@ -258,7 +284,11 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         masm.bind(&notOsr);
         // Load the scope chain in R1.
         JS_ASSERT(R1.scratchReg() != r0);
+#ifdef HAVE_APCS_FRAME
+        masm.loadPtr(Address(r11, offsetof(EnterJITStack, scopeChain) - 40), R1.scratchReg());
+#else
         masm.loadPtr(Address(r11, offsetof(EnterJITStack, scopeChain)), R1.scratchReg());
+#endif
     }
 
     // Call the function.
@@ -290,8 +320,10 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
     //   aasm->as_extdtr(IsStore, 64, true, Offset,
     //                   JSReturnReg_Data, EDtrAddr(r5, EDtrOffImm(0)));
 
+#ifndef HAVE_APCS_FRAME
     // Get rid of the bogus r0 push.
     aasm->as_add(sp, sp, Imm8(4));
+#endif
 
     // Restore non-volatile registers and return.
     GenerateReturn(masm, JS_TRUE);
