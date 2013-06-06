@@ -251,7 +251,7 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         masm.push(Imm32(0)); // Fake return address.
         masm.enterFakeExitFrame();
 
-        masm.push(framePtr); // BaselineFrame
+	// r11 (== framePtr) is callee-save
         masm.push(r0); // jitcode
 
         masm.setupUnalignedABICall(3, scratch);
@@ -262,7 +262,6 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
 
         Register jitcode = regs.takeAny();
         masm.pop(jitcode);
-        masm.pop(framePtr);
 
         JS_ASSERT(jitcode != ReturnReg);
 
