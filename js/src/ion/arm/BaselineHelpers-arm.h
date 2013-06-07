@@ -122,8 +122,13 @@ EmitCallVM(IonCode *target, MacroAssembler &masm)
 }
 
 // Size of vales pushed by EmitEnterStubFrame.
+#ifdef HAVE_APCS_FRAME
+static const uint32_t STUB_FRAME_SIZE = 8 * sizeof(void *);
+static const uint32_t STUB_FRAME_SAVED_STUB_OFFSET = 5 * sizeof(void *);
+#else
 static const uint32_t STUB_FRAME_SIZE = 4 * sizeof(void *);
 static const uint32_t STUB_FRAME_SAVED_STUB_OFFSET = sizeof(void *);
+#endif
 
 inline void
 EmitEnterStubFrame(MacroAssembler &masm, Register scratch)
@@ -148,7 +153,16 @@ EmitEnterStubFrame(MacroAssembler &masm, Register scratch)
     // Save old frame pointer, stack pointer and stub reg.
     masm.push(BaselineStubReg);
     masm.push(BaselineFrameReg);
+#ifdef HAVE_APCS_FRAME
+    masm.mov(BaselineFrameReg, scratch);
     masm.mov(BaselineStackReg, BaselineFrameReg);
+    masm.push(BaselineFrameReg);
+    masm.push(BaselineFrameReg); // Don't care
+    masm.push(scratch);
+    masm.push(scratch); // Alignment padding
+#else
+    masm.mov(BaselineStackReg, BaselineFrameReg);
+#endif
 
     // We pushed 4 words, so the stack is still aligned to 8 bytes.
     masm.checkStackAlignment();
