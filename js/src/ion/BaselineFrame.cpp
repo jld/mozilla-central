@@ -105,7 +105,11 @@ BaselineFrame::initFunctionScopeObjects(JSContext *cx)
 bool
 BaselineFrame::initForOsr(StackFrame *fp, uint32_t numStackValues)
 {
+#ifdef HAVE_APCS_FRAME
+    memset(this, 0, sizeof(*this) - sizeof(apcs_frame_));
+#else
     mozilla::PodZero(this);
+#endif
 
     scopeChain_ = fp->scopeChain();
 
