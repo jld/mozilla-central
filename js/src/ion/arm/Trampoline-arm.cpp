@@ -116,7 +116,7 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
 
     // Save stack pointer.
     if (type == EnterJitBaseline)
-        masm.movePtr(sp, r11);
+        masm.movePtr(sp, BaselineFrameReg);
 
     // Load the number of actual arguments into r10.
     masm.loadPtr(slot_vp, r10);
@@ -177,10 +177,10 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         GeneralRegisterSet regs(GeneralRegisterSet::All());
         regs.take(JSReturnOperand);
         regs.takeUnchecked(OsrFrameReg);
-        regs.take(r11);
+        regs.take(BaselineFrameReg);
         regs.take(ReturnReg);
 
-        const Address slot_numStackValues(r11, offsetof(EnterJITStack, numStackValues));
+        const Address slot_numStackValues(BaselineFrameReg, offsetof(EnterJITStack, numStackValues));
 
         Label notOsr;
         masm.branchTestPtr(Assembler::Zero, OsrFrameReg, OsrFrameReg, &notOsr);
@@ -207,12 +207,11 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         }
 
         // Push previous frame pointer.
-        masm.push(r11);
+        masm.push(BaselineFrameReg);
 
         // Reserve frame.
-        Register framePtr = r11;
         masm.subPtr(Imm32(BaselineFrame::Size()), sp);
-        masm.mov(sp, framePtr);
+        masm.mov(sp, BaselineFrameReg);
 
         // Reserve space for locals and stack values.
         masm.ma_lsl(Imm32(3), numStackValues, scratch);
@@ -225,24 +224,24 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         masm.push(Imm32(0)); // Fake return address.
         masm.enterFakeExitFrame();
 
-        masm.push(framePtr); // BaselineFrame
+        masm.push(BaselineFrameReg); // BaselineFrame
         masm.push(r0); // jitcode
 
         masm.setupUnalignedABICall(3, scratch);
-        masm.passABIArg(r11); // BaselineFrame
+        masm.passABIArg(BaselineFrameReg); // BaselineFrame
         masm.passABIArg(OsrFrameReg); // StackFrame
         masm.passABIArg(numStackValues);
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, ion::InitBaselineFrameForOsr));
 
         Register jitcode = regs.takeAny();
         masm.pop(jitcode);
-        masm.pop(framePtr);
+        masm.pop(BaselineFrameReg);
 
         JS_ASSERT(jitcode != ReturnReg);
 
         Label error;
         masm.addPtr(Imm32(IonExitFrameLayout::SizeWithFooter()), sp);
-        masm.addPtr(Imm32(BaselineFrame::Size()), framePtr);
+        masm.addPtr(Imm32(BaselineFrame::Size()), BaselineFrameReg);
         masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &error);
 
         masm.jump(jitcode);
@@ -250,7 +249,7 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         // OOM: load error value, discard return address and previous frame
         // pointer and return.
         masm.bind(&error);
-        masm.mov(framePtr, sp);
+        masm.mov(BaselineFrameReg, sp);
         masm.addPtr(Imm32(2 * sizeof(uintptr_t)), sp);
         masm.moveValue(MagicValue(JS_ION_ERROR), JSReturnOperand);
         masm.jump(&returnLabel);
@@ -258,7 +257,7 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         masm.bind(&notOsr);
         // Load the scope chain in R1.
         JS_ASSERT(R1.scratchReg() != r0);
-        masm.loadPtr(Address(r11, offsetof(EnterJITStack, scopeChain)), R1.scratchReg());
+        masm.loadPtr(Address(BaselineFrameReg, offsetof(EnterJITStack, scopeChain)), R1.scratchReg());
     }
 
     // Call the function.
@@ -374,7 +373,6 @@ IonRuntime::generateArgumentsRectifier(JSContext *cx, ExecutionMode mode, void *
     masm.moveValue(UndefinedValue(), r5, r4);
 
     masm.ma_mov(sp, r3); // Save %sp.
-    masm.ma_mov(sp, r7); // Save %sp again.
 
     // Push undefined.
     {
@@ -788,7 +786,7 @@ IonRuntime::generateDebugTrapHandler(JSContext *cx)
     Register scratch2 = r1;
 
     // Load BaselineFrame pointer in scratch1.
-    masm.mov(r11, scratch1);
+    masm.mov(BaselineFrameReg, scratch1);
     masm.subPtr(Imm32(BaselineFrame::Size()), scratch1);
 
     // Enter a stub frame and call the HandleDebugTrap VM function. Ensure
@@ -816,10 +814,10 @@ IonRuntime::generateDebugTrapHandler(JSContext *cx)
     masm.mov(lr, pc);
 
     masm.bind(&forcedReturn);
-    masm.loadValue(Address(r11, BaselineFrame::reverseOffsetOfReturnValue()),
+    masm.loadValue(Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfReturnValue()),
                    JSReturnOperand);
-    masm.mov(r11, sp);
-    masm.pop(r11);
+    masm.mov(BaselineFrameReg, sp);
+    masm.pop(BaselineFrameReg);
     masm.ret();
 
     Linker linker(masm);
