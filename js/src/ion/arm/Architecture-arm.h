@@ -84,7 +84,11 @@ class Registers
     static const Code Invalid = invalid_reg;
 
     static const uint32_t Total = 16;
-    static const uint32_t Allocatable = 13;
+#ifdef HAVE_APCS_FRAME
+    static const uint32_t Allocatable = 11;
+#else
+    static const uint32_t Allocatable = 12;
+#endif
 
     static const uint32_t AllMask = (1 << Total) - 1;
     static const uint32_t ArgRegMask = (1 << r0) | (1 << r1) | (1 << r2) | (1 << r3);
@@ -118,6 +122,9 @@ class Registers
     static const uint32_t NonAllocatableMask =
         (1 << Registers::sp) |
         (1 << Registers::r12) | // r12 = ip = scratch
+#ifdef HAVE_APCS_FRAME
+        (1 << Registers::r11) | // r11 = fp
+#endif
         (1 << Registers::lr) |
         (1 << Registers::pc);
 

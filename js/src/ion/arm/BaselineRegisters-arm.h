@@ -18,8 +18,14 @@ namespace ion {
 // r14 = link-register
 
 // r13 = stack-pointer
+#ifdef HAVE_APCS_FRAME
+// r11 is a frame pointer for C/C++, but it's a different frame layout from BC.
+// Thus, "r7 = frame-pointer" for our purposes.
+static const Register BaselineFrameReg = r7;
+#else
 // r11 = frame-pointer
 static const Register BaselineFrameReg = r11;
+#endif
 static const Register BaselineStackReg = sp;
 
 // ValueOperands R0, R1, and R2.
@@ -43,6 +49,7 @@ static const Register ExtractTemp1        = InvalidReg;
 static const Register BaselineSecondScratchReg = r6;
 
 // R7 - R9 are generally available for use within stubcode.
+// (Unless BaselineFrameReg is r7; in which case, not that.)
 
 // Note that BaselineTailCallReg is actually just the link
 // register.  In ARM code emission, we do not clobber BaselineTailCallReg

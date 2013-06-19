@@ -114,10 +114,6 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
     // Load calleeToken into r9.
     masm.loadPtr(slot_token, r9);
 
-    // Save stack pointer.
-    if (type == EnterJitBaseline)
-        masm.movePtr(sp, BaselineFrameReg);
-
     // Load the number of actual arguments into r10.
     masm.loadPtr(slot_vp, r10);
     masm.unboxInt32(Address(r10, 0), r10);
@@ -160,6 +156,11 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         aasm->as_b(&header, Assembler::NonZero);
         masm.bind(&footer);
     }
+
+    // Save pointer to the EnterJITStack
+    // (This happens after the argument copying in case BaselineFrameReg is r7.)
+    if (type == EnterJitBaseline)
+        masm.movePtr(r8, BaselineFrameReg);
 
     masm.ma_sub(r8, sp, r8);
     masm.makeFrameDescriptor(r8, IonFrame_Entry);
