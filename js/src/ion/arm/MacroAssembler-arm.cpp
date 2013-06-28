@@ -7,6 +7,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 
+#include "ion/arm/BaselineRegisters-arm.h"
 #include "ion/arm/MacroAssembler-arm.h"
 #include "ion/BaselineFrame.h"
 #include "ion/MoveEmitter.h"
@@ -3246,7 +3247,7 @@ MacroAssemblerARMCompat::handleFailureWithHandler(void *handler)
     // and jump to the catch block.
     bind(&catch_);
     ma_ldr(Operand(sp, offsetof(ResumeFromException, target)), r0);
-    ma_ldr(Operand(sp, offsetof(ResumeFromException, framePointer)), r11);
+    ma_ldr(Operand(sp, offsetof(ResumeFromException, framePointer)), BaselineFrameReg);
     ma_ldr(Operand(sp, offsetof(ResumeFromException, stackPointer)), sp);
     jump(r0);
 
@@ -3258,7 +3259,7 @@ MacroAssemblerARMCompat::handleFailureWithHandler(void *handler)
     loadValue(Operand(sp, offsetof(ResumeFromException, exception)), exception);
 
     ma_ldr(Operand(sp, offsetof(ResumeFromException, target)), r0);
-    ma_ldr(Operand(sp, offsetof(ResumeFromException, framePointer)), r11);
+    ma_ldr(Operand(sp, offsetof(ResumeFromException, framePointer)), BaselineFrameReg);
     ma_ldr(Operand(sp, offsetof(ResumeFromException, stackPointer)), sp);
 
     pushValue(BooleanValue(true));
@@ -3267,11 +3268,11 @@ MacroAssemblerARMCompat::handleFailureWithHandler(void *handler)
 
     // Only used in debug mode. Return BaselineFrame->returnValue() to the caller.
     bind(&return_);
-    ma_ldr(Operand(sp, offsetof(ResumeFromException, framePointer)), r11);
+    ma_ldr(Operand(sp, offsetof(ResumeFromException, framePointer)), BaselineFrameReg);
     ma_ldr(Operand(sp, offsetof(ResumeFromException, stackPointer)), sp);
-    loadValue(Address(r11, BaselineFrame::reverseOffsetOfReturnValue()), JSReturnOperand);
-    ma_mov(r11, sp);
-    pop(r11);
+    loadValue(Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfReturnValue()), JSReturnOperand);
+    ma_mov(BaselineFrameReg, sp);
+    pop(BaselineFrameReg);
     ret();
 }
 
