@@ -69,6 +69,9 @@
 #include "nsThreadUtils.h"
 #include "TableTicker.h"
 #include "UnwinderThread2.h"
+#ifdef __ARM_EABI__
+#include "EHABIStackWalk.h"
+#endif
 
 #include <string.h>
 #include <stdio.h>
@@ -309,6 +312,9 @@ Sampler::~Sampler() {
 void Sampler::Start() {
   LOG("Sampler started");
 
+#ifdef __ARM_EABI__
+  mozilla::ehabi::AddrSpace::Current(false);
+#endif
   SamplerRegistry::AddActiveSampler(this);
 
   // Initialize signal handler communication

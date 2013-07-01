@@ -6,6 +6,9 @@
 // Android runs a fairly new Linux kernel, so signal info is there,
 // but the C library doesn't have the structs defined.
 
+#ifndef mozilla_android_signal_defs_h__
+#define mozilla_android_signal_defs_h__
+
 #include <android/api-level.h>
 
 // All NDK platform versions have asm/sigcontext.h for ARM
@@ -27,5 +30,7 @@ typedef struct ucontext {
   mcontext_t uc_mcontext;
   __sigset_t uc_sigmask;
 } ucontext_t;
+#endif
+
 #endif
 
