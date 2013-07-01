@@ -114,6 +114,7 @@ CPP_SOURCES += [
 if CONFIG['OS_ARCH'] == 'Linux':
     CPP_SOURCES += [
         'MapsMemoryReporter.cpp',
+        'EHABIStackWalk.cpp' # FIXME make this more specific
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':

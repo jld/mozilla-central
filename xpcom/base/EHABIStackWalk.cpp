@@ -1,0 +1,403 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "EHABIStackWalk.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/Endian.h"
+
+#include <algorithm>
+#include <elf.h>
+
+#ifndef PT_ARM_EXIDX
+#define PT_ARM_EXIDX 0x70000001
+#endif
+
+namespace mozilla {
+namespace ehabi {
+
+struct PRel31 {
+  uint32_t bits() const { return bits_; }
+  bool topBit() const { return bits_ & 0x80000000; }
+  uint32_t value() const { return bits_ & 0x7fffffff; }
+  int32_t offset() const { return (static_cast<int32_t>(bits_) << 1) >> 1; }
+  const void *compute() const {
+    return reinterpret_cast<const char *>(this) + offset();
+  }
+private:
+  uint32_t bits_;
+  PRel31(const PRel31 &copied) MOZ_DELETE;
+  PRel31() MOZ_DELETE;
+};
+
+struct Entry {
+  PRel31 startPC;
+  PRel31 exidx;
+private:
+  Entry(const Entry &copied) MOZ_DELETE;
+  Entry() MOZ_DELETE;
+};
+
+
+struct Interp {
+private:
+  State &mState;
+  uint32_t mStackLimit;
+  uint32_t mStackBase;
+  const uint32_t *mNextWord;
+  uint32_t mWord;
+  uint8_t mWordsLeft;
+  uint8_t mBytesLeft;
+  bool mFailed;
+
+public:
+  Interp(State &aState, const Entry *aEntry,
+	 void *aStackLimit, void *aStackBase)
+    : mState(aState),
+      mStackLimit(reinterpret_cast<uint32_t>(aStackLimit)),
+      mStackBase(reinterpret_cast<uint32_t>(aStackBase)),
+      mNextWord(0),
+      mWordsLeft(0),
+      mFailed(false)
+  {
+    const PRel31 &exidx = aEntry->exidx;
+    uint32_t firstWord;
+
+    if (exidx.bits() == 1) {  // EXIDX_CANTUNWIND
+      mFailed = true;
+      return;
+    }
+    if (exidx.topBit()) {
+      firstWord = exidx.bits();
+    } else {
+      mNextWord = reinterpret_cast<const uint32_t *>(exidx.compute());
+      firstWord = *mNextWord++;
+    }
+
+    switch (firstWord >> 24) {
+    case 0x80: // short
+      mWord = firstWord << 8;
+      mBytesLeft = 3;
+      break;
+    case 0x81: case 0x82: // long; catch descriptor size ignored
+      mWord = firstWord << 16;
+      mBytesLeft = 2;
+      mWordsLeft = (firstWord >> 16) & 0xff;
+      break;
+    default:
+      // unknown personality
+      mFailed = true;
+    }
+  }
+
+private:
+  enum {
+    I_ADDSP    = 0x00, // 0sxxxxxx (subtract if s)
+    M_ADDSP    = 0x80,
+    I_POPMASK  = 0x80, // 1000iiii iiiiiiii (if any i set)
+    M_POPMASK  = 0xf0,
+    I_MOVSP    = 0x90, // 1001nnnn
+    M_MOVSP    = 0xf0,
+    I_POPN     = 0xa0, // 1010lnnn
+    M_POPN     = 0xf0,
+    I_FINISH   = 0xb0, // 10110000
+    I_POPLO    = 0xb1, // 10110001 0000iiii (if any i set)
+    I_ADDSPBIG = 0xb2, // 10110010 uleb128
+    I_POPFDX   = 0xb3, // 10110011 sssscccc
+    I_POPFDX8  = 0xb8, // 10111nnn
+    M_POPFDX8  = 0xf8,
+    // "Intel Wireless MMX" extensions omitted.
+    I_POPFDD   = 0xc8, // 1100100h sssscccc
+    M_POPFDD   = 0xfe,
+    I_POPFDD8  = 0xd0, // 11010nnn
+    M_POPFDD8  = 0xf8
+  };
+
+  uint8_t next() {
+    if (mBytesLeft == 0) {
+      if (mWordsLeft == 0) {
+	return I_FINISH;
+      }
+      mWord = *mNextWord++;
+      mBytesLeft = 4;
+    }
+    mBytesLeft--;
+    mWord = (mWord << 8) | (mWord >> 24); // rotate
+    return mWord;
+  }
+
+  uint32_t &vSP() { return mState[R_SP]; }
+  uint32_t *ptrSP() { return reinterpret_cast<uint32_t *>(vSP()); }
+
+  void checkStackBase() { if (vSP() > mStackBase) mFailed = true; }
+  void checkStackLimit() { if (vSP() <= mStackLimit) mFailed = true; }
+  void checkStackAlign() { if ((vSP() & 3) != 0) mFailed = true; }
+  void checkStack() {
+    checkStackBase();
+    checkStackLimit();
+    checkStackAlign();
+  }
+
+  void popRange(uint8_t first, uint8_t last, uint16_t mask) {
+    bool hasSP = (mask << first) & (1 << R_SP);
+    uint32_t tmpSP;
+    if (mask == 0)
+      mFailed = true;
+    for (uint8_t r = first; r <= last; ++r) {
+      if (mask & 1) {
+	if (r == R_SP)
+	  tmpSP = *ptrSP();
+	else
+	  mState[r] = *ptrSP();
+	vSP() += 4;
+	checkStackBase();
+	if (mFailed)
+	  return;
+      }
+      mask >>= 1;
+    }
+    if (hasSP) {
+      vSP() = tmpSP;
+      checkStack();
+    }
+  }
+
+public:
+  bool unwind();
+};
+
+
+bool State::unwind(const Entry *aEntry, void *stackLimit, void *stackTop) {
+  Interp interp(*this, aEntry, stackLimit, stackTop);
+  return interp.unwind();
+}
+
+bool Interp::unwind() {
+  mState[R_PC] = 0;
+  checkStack();
+  while (!mFailed) {
+    uint8_t insn = next();
+    // PGO can probably reorder these, but try to put common ones first.
+
+    // 00xxxxxx: vsp = vsp + (xxxxxx << 2) + 4
+    // 01xxxxxx: vsp = vsp - (xxxxxx << 2) - 4
+    if ((insn & M_ADDSP) == I_ADDSP) {
+      uint32_t offset = ((insn & 0x3f) << 2) + 4;
+      if (insn & 0x40) {
+	vSP() -= offset;
+	checkStackLimit();
+      } else {
+	vSP() += offset;
+	checkStackBase();
+      }
+      continue;
+    }
+
+    // 10100nnn: Pop r4-r[4+nnn]
+    // 10101nnn: Pop r4-r[4+nnn], r14
+    if ((insn & M_POPN) == I_POPN) {
+      uint8_t n = insn & 0x07;
+      bool lr = insn & 0x08;
+      uint32_t *ptr = ptrSP();
+      vSP() += (n + (lr ? 1 : 0)) * 4;
+      checkStackBase();
+      for (uint8_t r = 4; r <= 4 + n; ++r)
+	mState[r] = *ptr++;
+      if (lr)
+	mState[R_LR] = *ptr++;
+      continue;
+    }
+
+    // 1011000: Finish
+    if (insn == I_FINISH) {
+      if (mState[R_PC] == 0)
+	mState[R_PC] = mState[R_LR];
+      return true;
+    }
+
+    // 1001nnnn: Set vsp = r[nnnn]
+    if ((insn & M_MOVSP) == I_MOVSP) {
+      vSP() = mState[insn & 0x0f];
+      checkStack();
+      continue;
+    }
+
+    // 11001000 sssscccc: Pop VFP regs D[16+ssss]-D[16+ssss+cccc] (as FLDMFDD)
+    // 11001001 sssscccc: Pop VFP regs D[ssss]-D[ssss+cccc] (as FLDMFDD)
+    if ((insn & M_POPFDD) == I_POPFDD) {
+      uint8_t n = (next() & 0x0f) + 1;
+      // Note: if the 16+ssss+cccc > 31, the encoding is reserved.
+      // As the space is currently unused, we don't try to check.
+      vSP() += 8 * n;
+      checkStackBase();
+    }
+
+    // 11010nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDD)
+    if ((insn & M_POPFDD8) == I_POPFDD8) {
+      uint8_t n = (insn & 0x07) + 1;
+      vSP() += 8 * n;
+      checkStackBase();
+    }
+
+    // 10110010 uleb128: vsp = vsp + 0x204 + (uleb128 << 2)
+    if (insn == I_ADDSPBIG) {
+      uint32_t acc = 0;
+      uint8_t byte;
+      // There are several potential overflows in this:
+      do {
+	byte = next();
+	acc = (acc << 7) | (byte & 0x7f);
+      } while (byte & 0x80);
+      uint32_t offset = 0x204 + (acc << 2);
+      // ...but check only the overflow that matters:
+      if (vSP() + offset < vSP())
+	mFailed = true;
+      vSP() += offset;
+      checkStackBase();
+    }
+
+    // 1000iiii iiiiiiii (i not all 0): Pop under masks {r15-r12}, {r11-r4}
+    if ((insn & M_POPMASK) == I_POPMASK) {
+      popRange(4, 15, ((insn & 0x0f) << 8) | next());
+      continue;
+    }
+
+    // 1011001 0000iiii (i not all 0): Pop under mask {r3-r0}
+    if (insn == I_POPLO) {
+      popRange(0, 3, next() & 0x0f);
+      continue;
+    }
+
+    // 10110011 sssscccc: Pop VFP regs D[ssss]-D[ssss+cccc] (as FLDMFDX)
+    if (insn == I_POPFDX) {
+      uint8_t n = (next() & 0x0f) + 1;
+      vSP() += 8 * n + 4;
+      checkStackBase();
+    }
+
+    // 10111nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDX)
+    if ((insn & M_POPFDX8) == I_POPFDX8) {
+      uint8_t n = (insn & 0x07) + 1;
+      vSP() += 8 * n + 4;
+      checkStackBase();
+    }
+
+    // unhandled instruction
+    mFailed = true;
+  }
+  return false;
+}
+
+
+bool operator<(const Table &lhs, const Table &rhs) {
+  return lhs.mStartPC < lhs.mEndPC;
+}
+
+Tables::Tables(const std::vector<Table>& aTables)
+  : mTables(aTables)
+{
+  std::sort(mTables.begin(), mTables.end());
+  uint32_t lastEnd = 0;
+  for (std::vector<Table>::iterator i = mTables.begin();
+       i != mTables.end(); ++i) {
+    MOZ_ASSERT(i->mStartPC >= lastEnd);
+    mStarts.push_back(i->mStartPC);
+    lastEnd = i->mEndPC;
+  }
+}
+
+const Table *Tables::lookup(uint32_t aPC) {
+  size_t i = std::upper_bound(mStarts.begin(), mStarts.end(), aPC)
+    - mStarts.begin();
+
+  if (i >= mTables.size() || aPC >= mTables[i].mEndPC)
+    return 0;
+  return &mTables[i];
+}
+
+
+const Entry *Table::lookup(uint32_t aPC) {
+  MOZ_ASSERT(aPC >= mStartPC);
+  if (aPC >= mEndPC)
+    return NULL;
+
+  const Entry *begin = reinterpret_cast<const Entry*>(mStartTable);
+  const Entry *end = reinterpret_cast<const Entry*>(mEndTable);
+  MOZ_ASSERT(begin < end);
+  if (aPC < reinterpret_cast<uint32_t>(begin->startPC.compute()))
+    return NULL;
+
+  while (end - begin > 1) {
+    const Entry *mid = begin + (end - begin) / 2;
+    if (aPC < reinterpret_cast<uint32_t>(mid->startPC.compute()))
+      end = mid;
+    else
+      begin = mid;
+  }
+  return begin;
+}
+
+
+#ifdef IS_LITTLE_ENDIAN
+static unsigned char hostEndian = ELFDATA2LSB;
+#else
+static unsigned char hostEndian = ELFDATA2MSB;
+#endif
+
+
+Table::Table(const void *aELF, size_t aSize, const std::string &aName)
+  : mStartPC(~0), // largest uint32_t
+    mEndPC(0),
+    mStartTable(0),
+    mEndTable(0),
+    mName(aName)
+{
+  const uint32_t base = reinterpret_cast<uint32_t>(aELF);
+
+  const Elf32_Ehdr &file = *(reinterpret_cast<Elf32_Ehdr *>(base));
+  if (memcmp(&file.e_ident[EI_MAG0], ELFMAG, SELFMAG) != 0 ||
+      file.e_ident[EI_CLASS] != ELFCLASS32 ||
+      file.e_ident[EI_DATA] != hostEndian ||
+      file.e_ident[EI_VERSION] != EV_CURRENT ||
+      file.e_ident[EI_OSABI] != ELFOSABI_SYSV ||
+      file.e_ident[EI_ABIVERSION] != 0 ||
+      file.e_machine != EM_ARM ||
+      file.e_version != EV_CURRENT)
+    // e_flags?
+    return;
+
+  const Elf32_Phdr *exidxHdr = 0, *zeroHdr = 0;
+  for (unsigned i = 0; i < file.e_phnum; ++i) {
+    const Elf32_Phdr &phdr =
+      *(reinterpret_cast<Elf32_Phdr *>(base + file.e_phoff
+				       + i * file.e_phentsize));
+    if (phdr.p_type == PT_ARM_EXIDX) {
+      exidxHdr = &phdr;
+    } else if (phdr.p_type == PT_LOAD) {
+      if (phdr.p_offset == 0) {
+	zeroHdr = &phdr;
+      }
+      if (phdr.p_flags & PF_X) {
+	mStartPC = std::min(mStartPC, base + phdr.p_vaddr);
+	mEndPC = std::max(mEndPC, base + phdr.p_vaddr + phdr.p_memsz);
+      }
+    }
+  }
+  if (!exidxHdr)
+    return;
+  if (!zeroHdr)
+    return;
+  uint32_t aslr = base - zeroHdr->p_vaddr;
+  mStartPC += aslr;
+  mEndPC += aslr;
+  mStartTable = reinterpret_cast<const void *>(aslr + exidxHdr->p_vaddr);
+  mEndTable = reinterpret_cast<const void *>(aslr + exidxHdr->p_vaddr
+					     + exidxHdr->p_memsz);
+}
+
+
+} // namesapce ehabi
+} // namespace mozilla
+
