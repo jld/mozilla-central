@@ -33,7 +33,7 @@ enum {
 struct Table {
   uint32_t mStartPC;
   uint32_t mEndPC;
-  uint32_t loadOffset;
+  uint32_t mLoadOffset;
   const void *mStartTable;
   const void *mEndTable;
   std::string mName;
@@ -49,6 +49,7 @@ class Tables {
 public:
   explicit Tables(const std::vector<Table>& aTables);
   const Table *lookup(uint32_t aPC);
+  static const Tables *Current();
 };
 
 }

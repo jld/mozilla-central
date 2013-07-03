@@ -5,6 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EHABIStackWalk.h"
+
+#include "shared-libraries.h"
+
 #include "mozilla/Attributes.h"
 #include "mozilla/Endian.h"
 
@@ -292,7 +295,7 @@ bool Interp::unwind() {
 
 
 bool operator<(const Table &lhs, const Table &rhs) {
-  return lhs.mStartPC < lhs.mEndPC;
+  return lhs.mStartPC < rhs.mEndPC;
 }
 
 Tables::Tables(const std::vector<Table>& aTables)
@@ -340,10 +343,12 @@ const Entry *Table::lookup(uint32_t aPC) {
 }
 
 
-#ifdef IS_LITTLE_ENDIAN
-static unsigned char hostEndian = ELFDATA2LSB;
+#if MOZ_LITTLE_ENDIAN
+static const unsigned char hostEndian = ELFDATA2LSB;
+#elif MOZ_BIG_ENDIAN
+static const unsigned char hostEndian = ELFDATA2MSB;
 #else
-static unsigned char hostEndian = ELFDATA2MSB;
+#error "No endian?"
 #endif
 
 
@@ -371,7 +376,7 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
     // e_flags?
     return;
 
-  MOZ_ASSERT(base + file.e_phoff + file.e_phnum * file.e_phentsize <= aSize);
+  MOZ_ASSERT(file.e_phoff + file.e_phnum * file.e_phentsize <= aSize);
   const Elf32_Phdr *exidxHdr = 0, *zeroHdr = 0;
   for (unsigned i = 0; i < file.e_phnum; ++i) {
     const Elf32_Phdr &phdr =
@@ -393,14 +398,28 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
     return;
   if (!zeroHdr)
     return;
-  loadOffset = base - zeroHdr->p_vaddr;
-  mStartPC += loadOffset;
-  mEndPC += loadOffset;
-  mStartTable = reinterpret_cast<const void *>(loadOffset + exidxHdr->p_vaddr);
-  mEndTable = reinterpret_cast<const void *>(loadOffset + exidxHdr->p_vaddr
+  mLoadOffset = base - zeroHdr->p_vaddr;
+  mStartPC += mLoadOffset;
+  mEndPC += mLoadOffset;
+  mStartTable = reinterpret_cast<const void *>(mLoadOffset + exidxHdr->p_vaddr);
+  mEndTable = reinterpret_cast<const void *>(mLoadOffset + exidxHdr->p_vaddr
 					     + exidxHdr->p_memsz);
 }
 
+
+const Tables *Tables::Current() {
+  SharedLibraryInfo info = SharedLibraryInfo::GetInfoForSelf();
+  std::vector<Table> tables;
+  
+  for (size_t i = 0; i < info.GetSize(); ++i) {
+    const SharedLibrary &lib = info.GetEntry(i);
+    Table tab(reinterpret_cast<const void *>(lib.GetStart()),
+              lib.GetEnd() - lib.GetStart(), lib.GetName());
+    if (tab)
+      tables.push_back(tab);
+  }
+  return new Tables(tables);
+}
 
 } // namesapce ehabi
 } // namespace mozilla

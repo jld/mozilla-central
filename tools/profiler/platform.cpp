@@ -7,6 +7,7 @@
 #include <sstream>
 #include <errno.h>
 
+#include "EHABIStackWalk.h"
 #include "IOInterposer.h"
 #include "ProfilerIOInterposeObserver.h"
 #include "platform.h"
@@ -417,6 +418,8 @@ const char** mozilla_sampler_get_features()
   return features;
 }
 
+mozilla::ehabi::Tables const * volatile EHABIstuff;
+
 // Values are only honored on the first start
 void mozilla_sampler_start(int aProfileEntries, int aInterval,
                            const char** aFeatures, uint32_t aFeatureCount,
@@ -443,6 +446,7 @@ void mozilla_sampler_start(int aProfileEntries, int aInterval,
     // Create the unwinder thread.  ATM there is only one.
     uwt__init();
   }
+  EHABIstuff = mozilla::ehabi::Tables::Current();
 
   tlsTicker.set(t);
   t->Start();
