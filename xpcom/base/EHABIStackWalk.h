@@ -33,6 +33,7 @@ enum {
 struct Table {
   uint32_t mStartPC;
   uint32_t mEndPC;
+  uint32_t loadOffset;
   const void *mStartTable;
   const void *mEndTable;
   std::string mName;

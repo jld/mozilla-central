@@ -356,6 +356,9 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
 {
   const uint32_t base = reinterpret_cast<uint32_t>(aELF);
 
+  if (aSize < sizeof(Elf32_Ehdr))
+    return;
+
   const Elf32_Ehdr &file = *(reinterpret_cast<Elf32_Ehdr *>(base));
   if (memcmp(&file.e_ident[EI_MAG0], ELFMAG, SELFMAG) != 0 ||
       file.e_ident[EI_CLASS] != ELFCLASS32 ||
@@ -368,6 +371,7 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
     // e_flags?
     return;
 
+  MOZ_ASSERT(base + file.e_phoff + file.e_phnum * file.e_phentsize <= aSize);
   const Elf32_Phdr *exidxHdr = 0, *zeroHdr = 0;
   for (unsigned i = 0; i < file.e_phnum; ++i) {
     const Elf32_Phdr &phdr =
@@ -389,11 +393,11 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
     return;
   if (!zeroHdr)
     return;
-  uint32_t aslr = base - zeroHdr->p_vaddr;
-  mStartPC += aslr;
-  mEndPC += aslr;
-  mStartTable = reinterpret_cast<const void *>(aslr + exidxHdr->p_vaddr);
-  mEndTable = reinterpret_cast<const void *>(aslr + exidxHdr->p_vaddr
+  loadOffset = base - zeroHdr->p_vaddr;
+  mStartPC += loadOffset;
+  mEndPC += loadOffset;
+  mStartTable = reinterpret_cast<const void *>(loadOffset + exidxHdr->p_vaddr);
+  mEndTable = reinterpret_cast<const void *>(loadOffset + exidxHdr->p_vaddr
 					     + exidxHdr->p_memsz);
 }
 
