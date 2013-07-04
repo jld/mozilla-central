@@ -312,10 +312,10 @@ Tables::Tables(const std::vector<Table>& aTables)
 }
 
 const Table *Tables::lookup(uint32_t aPC) {
-  size_t i = std::upper_bound(mStarts.begin(), mStarts.end(), aPC)
-    - mStarts.begin();
+  ptrdiff_t i = (std::upper_bound(mStarts.begin(), mStarts.end(), aPC)
+                 - mStarts.begin()) - 1;
 
-  if (i >= mTables.size() || aPC >= mTables[i].mEndPC)
+  if (i < 0 || aPC >= mTables[i].mEndPC)
     return 0;
   return &mTables[i];
 }
@@ -389,8 +389,8 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
 	zeroHdr = &phdr;
       }
       if (phdr.p_flags & PF_X) {
-	mStartPC = std::min(mStartPC, base + phdr.p_vaddr);
-	mEndPC = std::max(mEndPC, base + phdr.p_vaddr + phdr.p_memsz);
+	mStartPC = std::min(mStartPC, phdr.p_vaddr);
+	mEndPC = std::max(mEndPC, phdr.p_vaddr + phdr.p_memsz);
       }
     }
   }
