@@ -59,7 +59,7 @@ private:
 
 public:
   Interp(State &aState, const Entry *aEntry,
-	 uint32_t aStackLimit, uint32_t aStackBase)
+         uint32_t aStackLimit, uint32_t aStackBase)
     : mState(aState),
       mStackLimit(aStackLimit),
       mStackBase(aStackBase),
@@ -123,7 +123,7 @@ private:
   uint8_t next() {
     if (mBytesLeft == 0) {
       if (mWordsLeft == 0) {
-	return I_FINISH;
+        return I_FINISH;
       }
       mWordsLeft--;
       mWord = *mNextWord++;
@@ -153,15 +153,15 @@ private:
       mFailed = true;
     for (uint8_t r = first; r <= last; ++r) {
       if (mask & 1) {
-	if (r == R_SP) {
+        if (r == R_SP) {
           hasSP = true;
-	  tmpSP = *ptrSP();
+          tmpSP = *ptrSP();
         } else
-	  mState[r] = *ptrSP();
-	vSP() += 4;
-	checkStackBase();
-	if (mFailed)
-	  return;
+          mState[r] = *ptrSP();
+        vSP() += 4;
+        checkStackBase();
+        if (mFailed)
+          return;
       }
       mask >>= 1;
     }
@@ -198,11 +198,11 @@ bool Interp::unwind() {
     if ((insn & M_ADDSP) == I_ADDSP) {
       uint32_t offset = ((insn & 0x3f) << 2) + 4;
       if (insn & 0x40) {
-	vSP() -= offset;
-	checkStackLimit();
+        vSP() -= offset;
+        checkStackLimit();
       } else {
-	vSP() += offset;
-	checkStackBase();
+        vSP() += offset;
+        checkStackBase();
       }
       continue;
     }
@@ -216,16 +216,16 @@ bool Interp::unwind() {
       vSP() += (n + (lr ? 1 : 0)) * 4;
       checkStackBase();
       for (uint8_t r = 4; r < 4 + n; ++r)
-	mState[r] = *ptr++;
+        mState[r] = *ptr++;
       if (lr)
-	mState[R_LR] = *ptr++;
+        mState[R_LR] = *ptr++;
       continue;
     }
 
     // 1011000: Finish
     if (insn == I_FINISH) {
       if (mState[R_PC] == 0)
-	mState[R_PC] = mState[R_LR];
+        mState[R_PC] = mState[R_LR];
       return true;
     }
 
@@ -263,7 +263,7 @@ bool Interp::unwind() {
       do {
         if (shift >= 32)
           return false;
-	byte = next();
+        byte = next();
         acc |= (byte & 0x7f) << shift;
         shift += 7;
       } while (byte & 0x80);
@@ -271,7 +271,7 @@ bool Interp::unwind() {
       // The calculations above could have overflowed.
       // But the one we care about this this:
       if (vSP() + offset < vSP())
-	mFailed = true;
+        mFailed = true;
       vSP() += offset;
       // ...so that this is the only other check needed:
       checkStackBase();
@@ -401,16 +401,16 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
   for (unsigned i = 0; i < file.e_phnum; ++i) {
     const Elf32_Phdr &phdr =
       *(reinterpret_cast<Elf32_Phdr *>(base + file.e_phoff
-				       + i * file.e_phentsize));
+                                       + i * file.e_phentsize));
     if (phdr.p_type == PT_ARM_EXIDX) {
       exidxHdr = &phdr;
     } else if (phdr.p_type == PT_LOAD) {
       if (phdr.p_offset == 0) {
-	zeroHdr = &phdr;
+        zeroHdr = &phdr;
       }
       if (phdr.p_flags & PF_X) {
-	mStartPC = std::min(mStartPC, phdr.p_vaddr);
-	mEndPC = std::max(mEndPC, phdr.p_vaddr + phdr.p_memsz);
+        mStartPC = std::min(mStartPC, phdr.p_vaddr);
+        mEndPC = std::max(mEndPC, phdr.p_vaddr + phdr.p_memsz);
       }
     }
   }
@@ -423,7 +423,7 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
   mEndPC += mLoadOffset;
   mStartTable = reinterpret_cast<const void *>(mLoadOffset + exidxHdr->p_vaddr);
   mEndTable = reinterpret_cast<const void *>(mLoadOffset + exidxHdr->p_vaddr
-					     + exidxHdr->p_memsz);
+                                             + exidxHdr->p_memsz);
 }
 
 
