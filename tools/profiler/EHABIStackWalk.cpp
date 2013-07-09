@@ -213,7 +213,7 @@ bool Interp::unwind() {
       uint32_t *ptr = ptrSP();
       vSP() += (n + (lr ? 1 : 0)) * 4;
       checkStackBase();
-      for (uint8_t r = 4; r <= 4 + n; ++r)
+      for (uint8_t r = 4; r < 4 + n; ++r)
 	mState[r] = *ptr++;
       if (lr)
 	mState[R_LR] = *ptr++;
