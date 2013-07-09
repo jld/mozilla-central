@@ -188,7 +188,9 @@ bool Interp::unwind() {
   checkStack();
   while (!mFailed) {
     uint8_t insn = next();
+#if 0
     LOGF("unwind insn = %02x", (unsigned)insn);
+#endif
     // PGO can probably reorder these, but try to put common ones first.
 
     // 00xxxxxx: vsp = vsp + (xxxxxx << 2) + 4
