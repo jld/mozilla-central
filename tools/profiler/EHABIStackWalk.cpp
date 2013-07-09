@@ -448,6 +448,30 @@ const AddrSpace *AddrSpace::Current() {
   return new AddrSpace(tables);
 }
 
+
+State::State(const mcontext_t &context) {
+#ifdef linux
+  mRegs[0] = context.arm_r0;
+  mRegs[1] = context.arm_r1;
+  mRegs[2] = context.arm_r2;
+  mRegs[3] = context.arm_r3;
+  mRegs[4] = context.arm_r4;
+  mRegs[5] = context.arm_r5;
+  mRegs[6] = context.arm_r6;
+  mRegs[7] = context.arm_r7;
+  mRegs[8] = context.arm_r8;
+  mRegs[9] = context.arm_r9;
+  mRegs[10] = context.arm_r10;
+  mRegs[11] = context.arm_fp;
+  mRegs[12] = context.arm_ip;
+  mRegs[13] = context.arm_sp;
+  mRegs[14] = context.arm_lr;
+  mRegs[15] = context.arm_pc;
+#else
+# error "Unhandled OS in mozilla::ehabi::State::State(const mcontext_t &)"
+#endif
+}
+
 } // namesapce ehabi
 } // namespace mozilla
 

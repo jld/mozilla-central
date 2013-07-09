@@ -11,6 +11,12 @@
 #include <vector>
 #include <string>
 
+#ifdef ANDROID
+# include "android-signal-defs.h"
+#else
+# include <ucontext.h>
+#endif
+
 namespace mozilla {
 namespace ehabi {
 
@@ -22,6 +28,7 @@ public:
   bool unwind(const Entry *aEntry, const void *stackBase);
   uint32_t &operator[](int i) { return mRegs[i]; }
   const uint32_t &operator[](int i) const { return mRegs[i]; }
+  State(const mcontext_t &);
 };
 
 enum {
