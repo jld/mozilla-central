@@ -39,17 +39,17 @@ struct Table {
   std::string mName;
 
   Table(const void *aELF, size_t aSize, const std::string &aName);
-  const Entry *lookup(uint32_t aPC);
+  const Entry *lookup(uint32_t aPC) const;
   operator bool() const { return mStartTable; }
 };
 
-class Tables {
+class AddrSpace {
   std::vector<uint32_t> mStarts;
   std::vector<Table> mTables;
 public:
-  explicit Tables(const std::vector<Table>& aTables);
-  const Table *lookup(uint32_t aPC);
-  static const Tables *Current();
+  explicit AddrSpace(const std::vector<Table>& aTables);
+  const Table *lookup(uint32_t aPC) const;
+  static const AddrSpace *Current();
 };
 
 }

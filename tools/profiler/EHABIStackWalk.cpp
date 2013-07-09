@@ -318,7 +318,7 @@ bool operator<(const Table &lhs, const Table &rhs) {
   return lhs.mStartPC < rhs.mEndPC;
 }
 
-Tables::Tables(const std::vector<Table>& aTables)
+AddrSpace::AddrSpace(const std::vector<Table>& aTables)
   : mTables(aTables)
 {
   std::sort(mTables.begin(), mTables.end());
@@ -331,7 +331,7 @@ Tables::Tables(const std::vector<Table>& aTables)
   }
 }
 
-const Table *Tables::lookup(uint32_t aPC) {
+const Table *AddrSpace::lookup(uint32_t aPC) const {
   ptrdiff_t i = (std::upper_bound(mStarts.begin(), mStarts.end(), aPC)
                  - mStarts.begin()) - 1;
 
@@ -341,7 +341,7 @@ const Table *Tables::lookup(uint32_t aPC) {
 }
 
 
-const Entry *Table::lookup(uint32_t aPC) {
+const Entry *Table::lookup(uint32_t aPC) const {
   MOZ_ASSERT(aPC >= mStartPC);
   if (aPC >= mEndPC)
     return NULL;
@@ -427,10 +427,10 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
 }
 
 
-const Tables *Tables::Current() {
+const AddrSpace *AddrSpace::Current() {
   SharedLibraryInfo info = SharedLibraryInfo::GetInfoForSelf();
   std::vector<Table> tables;
-  
+
   for (size_t i = 0; i < info.GetSize(); ++i) {
     const SharedLibrary &lib = info.GetEntry(i);
     if (lib.GetOffset() != 0)
@@ -445,7 +445,7 @@ const Tables *Tables::Current() {
     if (tab)
       tables.push_back(tab);
   }
-  return new Tables(tables);
+  return new AddrSpace(tables);
 }
 
 } // namesapce ehabi
