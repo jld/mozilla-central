@@ -147,15 +147,16 @@ private:
   }
 
   void popRange(uint8_t first, uint8_t last, uint16_t mask) {
-    bool hasSP = (mask << first) & (1 << R_SP);
+    bool hasSP = false;
     uint32_t tmpSP;
     if (mask == 0)
       mFailed = true;
     for (uint8_t r = first; r <= last; ++r) {
       if (mask & 1) {
-	if (r == R_SP)
+	if (r == R_SP) {
+          hasSP = true;
 	  tmpSP = *ptrSP();
-	else
+        } else
 	  mState[r] = *ptrSP();
 	vSP() += 4;
 	checkStackBase();
