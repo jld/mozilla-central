@@ -7,6 +7,7 @@
 #include "EHABIStackWalk.h"
 
 #include "shared-libraries.h"
+#include "platform.h"
 
 #include "mozilla/Attributes.h"
 #include "mozilla/Endian.h"
@@ -44,8 +45,9 @@ private:
 };
 
 
-struct Interp {
+class Interp {
 private:
+  // FIXME: GCC seems to think that `mState` can alias `*this`.
   State &mState;
   uint32_t mStackLimit;
   uint32_t mStackBase;
@@ -182,6 +184,7 @@ bool Interp::unwind() {
   checkStack();
   while (!mFailed) {
     uint8_t insn = next();
+    LOGF("unwind insn = %02x", (unsigned)insn);
     // PGO can probably reorder these, but try to put common ones first.
 
     // 00xxxxxx: vsp = vsp + (xxxxxx << 2) + 4
@@ -201,7 +204,7 @@ bool Interp::unwind() {
     // 10100nnn: Pop r4-r[4+nnn]
     // 10101nnn: Pop r4-r[4+nnn], r14
     if ((insn & M_POPN) == I_POPN) {
-      uint8_t n = insn & 0x07;
+      uint8_t n = (insn & 0x07) + 1;
       bool lr = insn & 0x08;
       uint32_t *ptr = ptrSP();
       vSP() += (n + (lr ? 1 : 0)) * 4;
@@ -235,6 +238,7 @@ bool Interp::unwind() {
       // As the space is currently unused, we don't try to check.
       vSP() += 8 * n;
       checkStackBase();
+      continue;
     }
 
     // 11010nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDD)
@@ -242,23 +246,30 @@ bool Interp::unwind() {
       uint8_t n = (insn & 0x07) + 1;
       vSP() += 8 * n;
       checkStackBase();
+      continue;
     }
 
     // 10110010 uleb128: vsp = vsp + 0x204 + (uleb128 << 2)
     if (insn == I_ADDSPBIG) {
       uint32_t acc = 0;
+      uint8_t shift = 0;
       uint8_t byte;
-      // There are several potential overflows in this:
       do {
+        if (shift >= 32)
+          return false;
 	byte = next();
-	acc = (acc << 7) | (byte & 0x7f);
+        acc |= (byte & 0x7f) << shift;
+        shift += 7;
       } while (byte & 0x80);
       uint32_t offset = 0x204 + (acc << 2);
-      // ...but check only the overflow that matters:
+      // The calculations above could have overflowed.
+      // But the one we care about this this:
       if (vSP() + offset < vSP())
 	mFailed = true;
       vSP() += offset;
+      // ...so that this is the only other check needed:
       checkStackBase();
+      continue;
     }
 
     // 1000iiii iiiiiiii (i not all 0): Pop under masks {r15-r12}, {r11-r4}
@@ -278,6 +289,7 @@ bool Interp::unwind() {
       uint8_t n = (next() & 0x0f) + 1;
       vSP() += 8 * n + 4;
       checkStackBase();
+      continue;
     }
 
     // 10111nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDX)
@@ -285,9 +297,11 @@ bool Interp::unwind() {
       uint8_t n = (insn & 0x07) + 1;
       vSP() += 8 * n + 4;
       checkStackBase();
+      continue;
     }
 
     // unhandled instruction
+    LOGF("Unhandled EHABI instruction 0x%02x", insn);
     mFailed = true;
   }
   return false;
@@ -413,6 +427,13 @@ const Tables *Tables::Current() {
   
   for (size_t i = 0; i < info.GetSize(); ++i) {
     const SharedLibrary &lib = info.GetEntry(i);
+    if (lib.GetOffset() != 0)
+      // TODO: if it has a name, and we haven't seen a mapping of
+      // offset 0 for that file, try opening it and reading the
+      // headers instead.  The only thing I've seen so far that's
+      // linked so as to need that treatment is the dynamic linker
+      // itself.
+      continue;
     Table tab(reinterpret_cast<const void *>(lib.GetStart()),
               lib.GetEnd() - lib.GetStart(), lib.GetName());
     if (tab)
