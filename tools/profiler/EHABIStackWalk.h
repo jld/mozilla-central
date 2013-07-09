@@ -19,7 +19,7 @@ struct Entry;
 class State {
 public:
   uint32_t mRegs[16];
-  bool unwind(const Entry *aEntry, void *stackLimit, void *stackTop);
+  bool unwind(const Entry *aEntry, const void *stackBase);
   uint32_t &operator[](int i) { return mRegs[i]; }
   const uint32_t &operator[](int i) const { return mRegs[i]; }
 };

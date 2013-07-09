@@ -59,10 +59,10 @@ private:
 
 public:
   Interp(State &aState, const Entry *aEntry,
-	 void *aStackLimit, void *aStackBase)
+	 uint32_t aStackLimit, uint32_t aStackBase)
     : mState(aState),
-      mStackLimit(reinterpret_cast<uint32_t>(aStackLimit)),
-      mStackBase(reinterpret_cast<uint32_t>(aStackBase)),
+      mStackLimit(aStackLimit),
+      mStackBase(aStackBase),
       mNextWord(0),
       mWordsLeft(0),
       mFailed(false)
@@ -176,8 +176,10 @@ public:
 };
 
 
-bool State::unwind(const Entry *aEntry, void *stackLimit, void *stackTop) {
-  Interp interp(*this, aEntry, stackLimit, stackTop);
+bool State::unwind(const Entry *aEntry, const void *stackLimit) {
+  Interp interp(*this, aEntry, mRegs[R_SP] - 4,
+                reinterpret_cast<uint32_t>(stackLimit));
+
   return interp.unwind();
 }
 
