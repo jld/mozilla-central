@@ -125,6 +125,7 @@ private:
       if (mWordsLeft == 0) {
 	return I_FINISH;
       }
+      mWordsLeft--;
       mWord = *mNextWord++;
       mBytesLeft = 4;
     }
