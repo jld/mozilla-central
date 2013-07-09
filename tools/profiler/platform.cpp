@@ -7,6 +7,7 @@
 #include <sstream>
 #include <errno.h>
 
+#include "mozilla/Atomics.h"
 #include "EHABIStackWalk.h"
 #include "IOInterposer.h"
 #include "ProfilerIOInterposeObserver.h"
@@ -299,7 +300,7 @@ void mozilla_sampler_init(void* stackTop)
 
   const char* features[] = {"js"
                          , "leaf"
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || (defined(SPS_ARCH_arm) && defined(linux))
                          , "stackwalk"
 #endif
 #if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
@@ -418,7 +419,7 @@ const char** mozilla_sampler_get_features()
   return features;
 }
 
-mozilla::ehabi::Tables const * volatile EHABIstuff;
+mozilla::Atomic<const mozilla::ehabi::AddrSpace *> EHABIstuff;
 
 // Values are only honored on the first start
 void mozilla_sampler_start(int aProfileEntries, int aInterval,
@@ -446,7 +447,12 @@ void mozilla_sampler_start(int aProfileEntries, int aInterval,
     // Create the unwinder thread.  ATM there is only one.
     uwt__init();
   }
-  EHABIstuff = mozilla::ehabi::Tables::Current();
+  if (!EHABIstuff) {
+    const mozilla::ehabi::AddrSpace *newSpace =
+      mozilla::ehabi::AddrSpace::Current();
+    if (!EHABIstuff.compareExchange(0, newSpace))
+      delete newSpace;
+  }
 
   tlsTicker.set(t);
   t->Start();

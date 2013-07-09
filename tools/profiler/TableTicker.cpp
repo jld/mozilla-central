@@ -34,6 +34,7 @@
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
 #include "PlatformMacros.h"
+#include "mozilla/Atomics.h"
 
 #if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
   #include "AndroidBridge.h"
@@ -57,6 +58,14 @@
 #endif
 #ifdef USE_NS_STACKWALK
  #include "nsStackWalk.h"
+#endif
+
+#if defined(SPS_ARCH_arm) && defined(linux)
+ #define USE_EHABI_STACKWALK
+#endif
+#ifdef USE_EHABI_STACKWALK
+ #include "EHABIStackWalk.h"
+ #include <pthread.h>
 #endif
 
 using std::string;
@@ -363,7 +372,7 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
 #endif
 
 
-#ifdef USE_NS_STACKWALK
+#if defined(USE_NS_STACKWALK) || defined(USE_EHABI_STACKWALK)
 typedef struct {
   void** array;
   void** sp_array;
@@ -371,6 +380,48 @@ typedef struct {
   size_t count;
 } PCArray;
 
+static void mergeNativeBacktrace(ThreadProfile &aProfile, const PCArray &array) {
+  aProfile.addTag(ProfileEntry('s', "(root)"));
+
+  PseudoStack* stack = aProfile.GetPseudoStack();
+  uint32_t pseudoStackPos = 0;
+
+  /* We have two stacks, the native C stack we extracted from unwinding,
+   * and the pseudostack we managed during execution. We want to consolidate
+   * the two in order. We do so by merging using the approximate stack address
+   * when each entry was push. When pushing JS entry we may not now the stack
+   * address in which case we have a NULL stack address in which case we assume
+   * that it follows immediatly the previous element.
+   *
+   *  C Stack | Address    --  Pseudo Stack | Address
+   *  main()  | 0x100          run_js()     | 0x40
+   *  start() | 0x80           jsCanvas()   | NULL
+   *  timer() | 0x50           drawLine()   | NULL
+   *  azure() | 0x10
+   *
+   * Merged: main(), start(), timer(), run_js(), jsCanvas(), drawLine(), azure()
+   */
+  // i is the index in C stack starting at main and decreasing
+  // pseudoStackPos is the position in the Pseudo stack starting
+  // at the first frame (run_js in the example) and increasing.
+  for (size_t i = array.count; i > 0; --i) {
+    while (pseudoStackPos < stack->stackSize()) {
+      volatile StackEntry& entry = stack->mStack[pseudoStackPos];
+
+      if (entry.stackAddress() < array.sp_array[i-1] && entry.stackAddress())
+        break;
+
+      addProfileEntry(entry, aProfile, stack, array.array[0]);
+      pseudoStackPos++;
+    }
+
+    aProfile.addTag(ProfileEntry('l', (void*)array.array[i-1]));
+  }
+}
+
+#endif
+
+#ifdef USE_NS_STACKWALK
 static
 void StackWalkCallback(void* aPC, void* aSP, void* aClosure)
 {
@@ -419,45 +470,58 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
   nsresult rv = NS_StackWalk(StackWalkCallback, /* skipFrames */ 0, maxFrames,
                              &array, thread, platformData);
 #endif
-  if (NS_SUCCEEDED(rv)) {
-    aProfile.addTag(ProfileEntry('s', "(root)"));
-
-    PseudoStack* stack = aProfile.GetPseudoStack();
-    uint32_t pseudoStackPos = 0;
-
-    /* We have two stacks, the native C stack we extracted from unwinding,
-     * and the pseudostack we managed during execution. We want to consolidate
-     * the two in order. We do so by merging using the approximate stack address
-     * when each entry was push. When pushing JS entry we may not now the stack
-     * address in which case we have a NULL stack address in which case we assume
-     * that it follows immediatly the previous element.
-     *
-     *  C Stack | Address    --  Pseudo Stack | Address
-     *  main()  | 0x100          run_js()     | 0x40
-     *  start() | 0x80           jsCanvas()   | NULL
-     *  timer() | 0x50           drawLine()   | NULL
-     *  azure() | 0x10
-     *
-     * Merged: main(), start(), timer(), run_js(), jsCanvas(), drawLine(), azure()
-     */
-    // i is the index in C stack starting at main and decreasing
-    // pseudoStackPos is the position in the Pseudo stack starting
-    // at the first frame (run_js in the example) and increasing.
-    for (size_t i = array.count; i > 0; --i) {
-      while (pseudoStackPos < stack->stackSize()) {
-        volatile StackEntry& entry = stack->mStack[pseudoStackPos];
-
-        if (entry.stackAddress() < array.sp_array[i-1] && entry.stackAddress())
-          break;
-
-        addProfileEntry(entry, aProfile, stack, array.array[0]);
-        pseudoStackPos++;
-      }
-
-      aProfile.addTag(ProfileEntry('l', (void*)array.array[i-1]));
-    }
-  }
+  if (NS_SUCCEEDED(rv))
+    mergeNativeBacktrace(aProfile, array);
 }
+#endif
+
+#ifdef USE_EHABI_STACKWALK
+void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample)
+{
+  extern Atomic<const mozilla::ehabi::AddrSpace *> EHABIstuff; // FIXME
+  const ehabi::AddrSpace *space = EHABIstuff;
+  ucontext_t *ucontext = reinterpret_cast<ucontext_t *>(aSample->context);
+  ehabi::State state(ucontext->uc_mcontext);
+  void *pc_array[1000];
+  void *sp_array[1000];
+  PCArray array = {
+    pc_array,
+    sp_array,
+    mozilla::ArrayLength(pc_array),
+    0
+  };
+  void *stackBase;
+
+  // FIXME this should be in the ThreadProfile or something
+  {
+    pthread_attr_t attr;
+    void *stackLimit;
+    size_t stackSize;
+
+    pthread_getattr_np(pthread_self(), &attr);
+    pthread_attr_getstack(&attr, &stackLimit, &stackSize);
+    stackBase = reinterpret_cast<char *>(stackLimit) + stackSize;
+  }
+
+  while (array.count < array.size) {
+    uint32_t pc = state[ehabi::R_PC], sp = state[ehabi::R_SP];
+    pc_array[array.count] = reinterpret_cast<void *>(pc);
+    sp_array[array.count] = reinterpret_cast<void *>(sp);
+    array.count++;
+
+    const ehabi::Table *table = space->lookup(pc);
+    if (!table)
+      break;
+    const ehabi::Entry *entry = table->lookup(pc);
+    if (!entry)
+      break;
+    if (!state.unwind(entry, stackBase))
+      break;
+  }
+
+  mergeNativeBacktrace(aProfile, array);
+}
+
 #endif
 
 static
@@ -522,7 +586,7 @@ void TableTicker::InplaceTick(TickSample* sample)
     }
   }
 
-#if defined(USE_BACKTRACE) || defined(USE_NS_STACKWALK)
+#if defined(USE_BACKTRACE) || defined(USE_NS_STACKWALK) || defined(USE_EHABI_STACKWALK)
   if (mUseStackWalk) {
     doNativeBacktrace(currThreadProfile, sample);
   } else {
