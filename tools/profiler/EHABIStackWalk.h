@@ -37,17 +37,23 @@ enum {
   R_PC = 15
 };
 
+struct EntryHandle {
+  const Entry *mValue;
+  EntryHandle(const Entry *aEntry) : mValue(aEntry) { }
+};
+
 struct Table {
   uint32_t mStartPC;
   uint32_t mEndPC;
   uint32_t mLoadOffset;
-  const void *mStartTable;
-  const void *mEndTable;
+  std::vector<EntryHandle> mEntries;
   std::string mName;
 
   Table(const void *aELF, size_t aSize, const std::string &aName);
   const Entry *lookup(uint32_t aPC) const;
-  operator bool() const { return mStartTable; }
+  operator bool() const { return mEntries.size() > 0; }
+  const std::string &name() const { return mName; }
+  uint32_t loadOffset() const { return mLoadOffset; }
 };
 
 class AddrSpace {

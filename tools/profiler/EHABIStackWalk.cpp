@@ -341,25 +341,29 @@ const Table *AddrSpace::lookup(uint32_t aPC) const {
 }
 
 
+bool operator<(const EntryHandle &lhs, const EntryHandle &rhs) {
+  return lhs.mValue->startPC.compute() < rhs.mValue->startPC.compute();
+}
+
 const Entry *Table::lookup(uint32_t aPC) const {
   MOZ_ASSERT(aPC >= mStartPC);
   if (aPC >= mEndPC)
     return NULL;
 
-  const Entry *begin = reinterpret_cast<const Entry*>(mStartTable);
-  const Entry *end = reinterpret_cast<const Entry*>(mEndTable);
+  std::vector<EntryHandle>::const_iterator begin = mEntries.begin();
+  std::vector<EntryHandle>::const_iterator end = mEntries.end();
   MOZ_ASSERT(begin < end);
-  if (aPC < reinterpret_cast<uint32_t>(begin->startPC.compute()))
+  if (aPC < reinterpret_cast<uint32_t>(begin->mValue->startPC.compute()))
     return NULL;
 
   while (end - begin > 1) {
-    const Entry *mid = begin + (end - begin) / 2;
-    if (aPC < reinterpret_cast<uint32_t>(mid->startPC.compute()))
+    std::vector<EntryHandle>::const_iterator mid = begin + (end - begin) / 2;
+    if (aPC < reinterpret_cast<uint32_t>(mid->mValue->startPC.compute()))
       end = mid;
     else
       begin = mid;
   }
-  return begin;
+  return begin->mValue;
 }
 
 
@@ -371,12 +375,9 @@ static const unsigned char hostEndian = ELFDATA2MSB;
 #error "No endian?"
 #endif
 
-
 Table::Table(const void *aELF, size_t aSize, const std::string &aName)
   : mStartPC(~0), // largest uint32_t
     mEndPC(0),
-    mStartTable(0),
-    mEndTable(0),
     mName(aName)
 {
   const uint32_t base = reinterpret_cast<uint32_t>(aELF);
@@ -421,9 +422,17 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
   mLoadOffset = base - zeroHdr->p_vaddr;
   mStartPC += mLoadOffset;
   mEndPC += mLoadOffset;
-  mStartTable = reinterpret_cast<const void *>(mLoadOffset + exidxHdr->p_vaddr);
-  mEndTable = reinterpret_cast<const void *>(mLoadOffset + exidxHdr->p_vaddr
-                                             + exidxHdr->p_memsz);
+
+  // Sadly, the table entries are not guaranteed to be sorted.
+  const Entry *startTable =
+    reinterpret_cast<const Entry *>(mLoadOffset + exidxHdr->p_vaddr);
+  const Entry *endTable =
+    reinterpret_cast<const Entry *>(mLoadOffset + exidxHdr->p_vaddr
+                                    + exidxHdr->p_memsz);
+  mEntries.reserve(endTable - startTable);
+  for (const Entry *i = startTable; i < endTable; ++i)
+    mEntries.push_back(i);
+  std::sort(mEntries.begin(), mEntries.end());
 }
 
 
