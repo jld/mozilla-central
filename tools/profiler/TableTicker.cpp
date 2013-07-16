@@ -478,8 +478,7 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
 #ifdef USE_EHABI_STACKWALK
 void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample)
 {
-  extern Atomic<const mozilla::ehabi::AddrSpace *> EHABIstuff; // FIXME
-  const ehabi::AddrSpace *space = EHABIstuff;
+  static Atomic<const mozilla::ehabi::AddrSpace *> spaceCell;
   ucontext_t *ucontext = reinterpret_cast<ucontext_t *>(aSample->context);
   ehabi::State state(ucontext->uc_mcontext);
   void *pc_array[1000];
@@ -491,6 +490,15 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
     0
   };
   void *stackBase;
+
+  const ehabi::AddrSpace *space = spaceCell;
+  if (!space) {
+    space = ehabi::AddrSpace::Current();
+    if (!spaceCell.compareExchange(nullptr, space)) {
+      delete space;
+      space = spaceCell;
+    }
+  }
 
   // FIXME this should be in the ThreadProfile or something
   {

@@ -419,8 +419,6 @@ const char** mozilla_sampler_get_features()
   return features;
 }
 
-mozilla::Atomic<const mozilla::ehabi::AddrSpace *> EHABIstuff;
-
 // Values are only honored on the first start
 void mozilla_sampler_start(int aProfileEntries, int aInterval,
                            const char** aFeatures, uint32_t aFeatureCount,
@@ -446,12 +444,6 @@ void mozilla_sampler_start(int aProfileEntries, int aInterval,
   if (t->HasUnwinderThread()) {
     // Create the unwinder thread.  ATM there is only one.
     uwt__init();
-  }
-  if (!EHABIstuff) {
-    const mozilla::ehabi::AddrSpace *newSpace =
-      mozilla::ehabi::AddrSpace::Current();
-    if (!EHABIstuff.compareExchange(0, newSpace))
-      delete newSpace;
   }
 
   tlsTicker.set(t);
