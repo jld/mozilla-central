@@ -7,8 +7,6 @@
 #include <sstream>
 #include <errno.h>
 
-#include "mozilla/Atomics.h"
-#include "EHABIStackWalk.h"
 #include "IOInterposer.h"
 #include "ProfilerIOInterposeObserver.h"
 #include "platform.h"
