@@ -23,15 +23,15 @@ namespace mozilla {
 namespace ehabi {
 
 struct PRel31 {
-  uint32_t bits() const { return bits_; }
-  bool topBit() const { return bits_ & 0x80000000; }
-  uint32_t value() const { return bits_ & 0x7fffffff; }
-  int32_t offset() const { return (static_cast<int32_t>(bits_) << 1) >> 1; }
+  uint32_t bits() const { return mBits; }
+  bool topBit() const { return mBits & 0x80000000; }
+  uint32_t value() const { return mBits & 0x7fffffff; }
+  int32_t offset() const { return (static_cast<int32_t>(mBits) << 1) >> 1; }
   const void *compute() const {
     return reinterpret_cast<const char *>(this) + offset();
   }
 private:
-  uint32_t bits_;
+  uint32_t mBits;
   PRel31(const PRel31 &copied) MOZ_DELETE;
   PRel31() MOZ_DELETE;
 };
