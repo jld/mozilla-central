@@ -49,6 +49,15 @@
  #include "nsStackWalk.h"
 #endif
 
+#if defined(SPS_ARCH_arm) && defined(linux)
+ #define USE_EHABI_STACKWALK
+#endif
+#ifdef USE_EHABI_STACKWALK
+ #include "EHABIStackWalk.h"
+ #include "mozilla/Atomics.h"
+ #include <pthread.h>
+#endif
+
 using std::string;
 using namespace mozilla;
 
@@ -337,7 +346,7 @@ void addProfileEntry(volatile StackEntry &entry, ThreadProfile &aProfile,
   }
 }
 
-#ifdef USE_NS_STACKWALK
+#if defined(USE_NS_STACKWALK) || defined(USE_EHABI_STACKWALK)
 typedef struct {
   void** array;
   void** sp_array;
@@ -440,6 +449,45 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
 }
 #endif
 
+#ifdef USE_EHABI_STACKWALK
+void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample)
+{
+  const ehabi::AddrSpace *space = ehabi::AddrSpace::Current(true); // can fail
+  ucontext_t *ucontext = reinterpret_cast<ucontext_t *>(aSample->context);
+  ehabi::State state(ucontext->uc_mcontext);
+  void *pc_array[1000];
+  void *sp_array[1000];
+  PCArray array = {
+    pc_array,
+    sp_array,
+    mozilla::ArrayLength(pc_array),
+    0
+  };
+  void *stackBase = aProfile.GetStackTop();
+
+  while (array.count < array.size) {
+    uint32_t pc = state[ehabi::R_PC], sp = state[ehabi::R_SP];
+    pc_array[array.count] = reinterpret_cast<void *>(pc);
+    sp_array[array.count] = reinterpret_cast<void *>(sp);
+    array.count++;
+
+    if (!space)
+      break;
+    const ehabi::Table *table = space->lookup(pc);
+    if (!table)
+      break;
+    const ehabi::Entry *entry = table->lookup(pc);
+    if (!entry)
+      break;
+    if (!state.unwind(entry, stackBase))
+      break;
+  }
+
+  mergeNativeBacktrace(aProfile, array);
+}
+
+#endif
+
 static
 void doSampleStackTrace(PseudoStack *aStack, ThreadProfile &aProfile, TickSample *sample)
 {
@@ -502,7 +550,7 @@ void TableTicker::InplaceTick(TickSample* sample)
     }
   }
 
-#if defined(USE_NS_STACKWALK)
+#if defined(USE_NS_STACKWALK) || defined(USE_EHABI_STACKWALK)
   if (mUseStackWalk) {
     doNativeBacktrace(currThreadProfile, sample);
   } else {
