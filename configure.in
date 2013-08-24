@@ -6500,10 +6500,6 @@ AC_SUBST(NSS_NO_LIBPKIX)
 dnl ========================================================
 dnl = Content process sandboxing
 dnl ========================================================
-if test -n "$gonkdir"; then
-    MOZ_CONTENT_SANDBOX=1
-fi
-
 MOZ_ARG_ENABLE_BOOL(content-sandbox,
 [  --enable-content-sandbox        Enable sandboxing support for content-processes],
     MOZ_CONTENT_SANDBOX=1)
