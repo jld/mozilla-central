@@ -6465,6 +6465,7 @@ dnl = Content process sandboxing
 dnl ========================================================
 if test -n "$gonkdir"; then
     MOZ_CONTENT_SANDBOX=1
+    MOZ_CONTENT_SANDBOX_REPORTER=1
 fi
 
 MOZ_ARG_ENABLE_BOOL(content-sandbox,
