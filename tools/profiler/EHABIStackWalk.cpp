@@ -89,19 +89,20 @@ class EHAddrSpace {
 public:
   explicit EHAddrSpace(const std::vector<EHTable>& aTables);
   const EHTable *lookup(uint32_t aPC) const;
-  static const EHAddrSpace *Current(bool aSignalContext);
+  static void Update();
+  static const EHAddrSpace *Get();
 };
 
 
 void EHABIStackWalkInit()
 {
-  EHAddrSpace::Current(false);
+  EHAddrSpace::Update();
 }
 
 size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
                       void **aSPs, void **aPCs, const size_t aNumFrames)
 {
-  const EHAddrSpace *space = EHAddrSpace::Current(true); // can fail
+  const EHAddrSpace *space = EHAddrSpace::Get();
   EHState state(aContext);
   size_t count = 0;
 
@@ -543,12 +544,16 @@ EHTable::EHTable(const void *aELF, size_t aSize, const std::string &aName)
 
 mozilla::Atomic<const EHAddrSpace*> EHAddrSpace::sCurrent(nullptr);
 
-const EHAddrSpace *EHAddrSpace::Current(bool aSignalContext) {
+// Needs comment.
+const EHAddrSpace *EHAddrSpace::Get() {
+  return sCurrent;
+}
+
+// Needs comment.
+void EHAddrSpace::Update() {
   const EHAddrSpace *space = sCurrent;
   if (space)
-    return space;
-  if (aSignalContext)
-    return nullptr;
+    return;
 
   SharedLibraryInfo info = SharedLibraryInfo::GetInfoForSelf();
   std::vector<EHTable> tables;
@@ -573,7 +578,6 @@ const EHAddrSpace *EHAddrSpace::Current(bool aSignalContext) {
     delete space;
     space = sCurrent;
   }
-  return space;
 }
 
 
