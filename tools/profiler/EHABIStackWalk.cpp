@@ -40,19 +40,18 @@
 
 
 namespace mozilla {
-namespace ehabi {
 
-struct Entry;
+struct EHEntry;
 
-class State {
+class EHState {
 public:
   // Note that any core register can be used as a "frame pointer" to
   // influence the unwinding process, so this must track all of them.
   uint32_t mRegs[16];
-  bool unwind(const Entry *aEntry, const void *stackBase);
+  bool unwind(const EHEntry *aEntry, const void *stackBase);
   uint32_t &operator[](int i) { return mRegs[i]; }
   const uint32_t &operator[](int i) const { return mRegs[i]; }
-  State(const mcontext_t &);
+  EHState(const mcontext_t &);
 };
 
 enum {
@@ -61,65 +60,63 @@ enum {
   R_PC = 15
 };
 
-struct EntryHandle {
-  const Entry *mValue;
-  EntryHandle(const Entry *aEntry) : mValue(aEntry) { }
+struct EHEntryHandle {
+  const EHEntry *mValue;
+  EHEntryHandle(const EHEntry *aEntry) : mValue(aEntry) { }
 };
 
-struct Table {
+struct EHTable {
   uint32_t mStartPC;
   uint32_t mEndPC;
   uint32_t mLoadOffset;
   // In principle we should be able to binary-search the index section in
   // place, but the ICS toolchain's linker is noncompliant and produces
   // indices that aren't entirely sorted (e.g., libc).  So we have this:
-  std::vector<EntryHandle> mEntries;
+  std::vector<EHEntryHandle> mEntries;
   std::string mName;
 
-  Table(const void *aELF, size_t aSize, const std::string &aName);
-  const Entry *lookup(uint32_t aPC) const;
+  EHTable(const void *aELF, size_t aSize, const std::string &aName);
+  const EHEntry *lookup(uint32_t aPC) const;
   operator bool() const { return mEntries.size() > 0; }
   const std::string &name() const { return mName; }
   uint32_t loadOffset() const { return mLoadOffset; }
 };
 
-class AddrSpace {
+class EHAddrSpace {
   std::vector<uint32_t> mStarts;
-  std::vector<Table> mTables;
-  static mozilla::Atomic<const AddrSpace*> sCurrent;
+  std::vector<EHTable> mTables;
+  static mozilla::Atomic<const EHAddrSpace*> sCurrent;
 public:
-  explicit AddrSpace(const std::vector<Table>& aTables);
-  const Table *lookup(uint32_t aPC) const;
-  static const AddrSpace *Current(bool aSignalContext);
+  explicit EHAddrSpace(const std::vector<EHTable>& aTables);
+  const EHTable *lookup(uint32_t aPC) const;
+  static const EHAddrSpace *Current(bool aSignalContext);
 };
-
-}
 
 
 void EHABIStackWalkInit()
 {
-  ehabi::AddrSpace::Current(false);
+  EHAddrSpace::Current(false);
 }
 
 size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
                       void **aSPs, void **aPCs, const size_t aNumFrames)
 {
-  const ehabi::AddrSpace *space = ehabi::AddrSpace::Current(true); // can fail
-  ehabi::State state(aContext);
+  const EHAddrSpace *space = EHAddrSpace::Current(true); // can fail
+  EHState state(aContext);
   size_t count = 0;
 
   while (count < aNumFrames) {
-    uint32_t pc = state[ehabi::R_PC], sp = state[ehabi::R_SP];
+    uint32_t pc = state[R_PC], sp = state[R_SP];
     aPCs[count] = reinterpret_cast<void *>(pc);
     aSPs[count] = reinterpret_cast<void *>(sp);
     count++;
 
     if (!space)
       break;
-    const ehabi::Table *table = space->lookup(pc);
+    const EHTable *table = space->lookup(pc);
     if (!table)
       break;
-    const ehabi::Entry *entry = table->lookup(pc);
+    const EHEntry *entry = table->lookup(pc);
     if (!entry)
       break;
     if (!state.unwind(entry, stackBase))
@@ -129,8 +126,6 @@ size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
   return count;
 }
 
-
-namespace ehabi {
 
 struct PRel31 {
   uint32_t bits() const { return mBits; }
@@ -146,19 +141,19 @@ private:
   PRel31() MOZ_DELETE;
 };
 
-struct Entry {
+struct EHEntry {
   PRel31 startPC;
   PRel31 exidx;
 private:
-  Entry(const Entry &copied) MOZ_DELETE;
-  Entry() MOZ_DELETE;
+  EHEntry(const EHEntry &copied) MOZ_DELETE;
+  EHEntry() MOZ_DELETE;
 };
 
 
-class Interp {
+class EHInterp {
 private:
   // FIXME: GCC seems to think that `mState` can alias `*this`.
-  State &mState;
+  EHState &mState;
   uint32_t mStackLimit;
   uint32_t mStackBase;
   const uint32_t *mNextWord;
@@ -168,8 +163,8 @@ private:
   bool mFailed;
 
 public:
-  Interp(State &aState, const Entry *aEntry,
-         uint32_t aStackLimit, uint32_t aStackBase)
+  EHInterp(EHState &aState, const EHEntry *aEntry,
+           uint32_t aStackLimit, uint32_t aStackBase)
     : mState(aState),
       mStackLimit(aStackLimit),
       mStackBase(aStackBase),
@@ -286,14 +281,14 @@ public:
 };
 
 
-bool State::unwind(const Entry *aEntry, const void *stackLimit) {
-  Interp interp(*this, aEntry, mRegs[R_SP] - 4,
-                reinterpret_cast<uint32_t>(stackLimit));
+bool EHState::unwind(const EHEntry *aEntry, const void *stackLimit) {
+  EHInterp interp(*this, aEntry, mRegs[R_SP] - 4,
+                  reinterpret_cast<uint32_t>(stackLimit));
 
   return interp.unwind();
 }
 
-bool Interp::unwind() {
+bool EHInterp::unwind() {
   mState[R_PC] = 0;
   checkStack();
   while (!mFailed) {
@@ -424,16 +419,16 @@ bool Interp::unwind() {
 }
 
 
-bool operator<(const Table &lhs, const Table &rhs) {
+bool operator<(const EHTable &lhs, const EHTable &rhs) {
   return lhs.mStartPC < rhs.mEndPC;
 }
 
-AddrSpace::AddrSpace(const std::vector<Table>& aTables)
+EHAddrSpace::EHAddrSpace(const std::vector<EHTable>& aTables)
   : mTables(aTables)
 {
   std::sort(mTables.begin(), mTables.end());
   DebugOnly<uint32_t> lastEnd = 0;
-  for (std::vector<Table>::iterator i = mTables.begin();
+  for (std::vector<EHTable>::iterator i = mTables.begin();
        i != mTables.end(); ++i) {
     MOZ_ASSERT(i->mStartPC >= lastEnd);
     mStarts.push_back(i->mStartPC);
@@ -441,7 +436,7 @@ AddrSpace::AddrSpace(const std::vector<Table>& aTables)
   }
 }
 
-const Table *AddrSpace::lookup(uint32_t aPC) const {
+const EHTable *EHAddrSpace::lookup(uint32_t aPC) const {
   ptrdiff_t i = (std::upper_bound(mStarts.begin(), mStarts.end(), aPC)
                  - mStarts.begin()) - 1;
 
@@ -451,23 +446,23 @@ const Table *AddrSpace::lookup(uint32_t aPC) const {
 }
 
 
-bool operator<(const EntryHandle &lhs, const EntryHandle &rhs) {
+bool operator<(const EHEntryHandle &lhs, const EHEntryHandle &rhs) {
   return lhs.mValue->startPC.compute() < rhs.mValue->startPC.compute();
 }
 
-const Entry *Table::lookup(uint32_t aPC) const {
+const EHEntry *EHTable::lookup(uint32_t aPC) const {
   MOZ_ASSERT(aPC >= mStartPC);
   if (aPC >= mEndPC)
     return NULL;
 
-  std::vector<EntryHandle>::const_iterator begin = mEntries.begin();
-  std::vector<EntryHandle>::const_iterator end = mEntries.end();
+  std::vector<EHEntryHandle>::const_iterator begin = mEntries.begin();
+  std::vector<EHEntryHandle>::const_iterator end = mEntries.end();
   MOZ_ASSERT(begin < end);
   if (aPC < reinterpret_cast<uint32_t>(begin->mValue->startPC.compute()))
     return NULL;
 
   while (end - begin > 1) {
-    std::vector<EntryHandle>::const_iterator mid = begin + (end - begin) / 2;
+    std::vector<EHEntryHandle>::const_iterator mid = begin + (end - begin) / 2;
     if (aPC < reinterpret_cast<uint32_t>(mid->mValue->startPC.compute()))
       end = mid;
     else
@@ -485,7 +480,7 @@ static const unsigned char hostEndian = ELFDATA2MSB;
 #error "No endian?"
 #endif
 
-Table::Table(const void *aELF, size_t aSize, const std::string &aName)
+EHTable::EHTable(const void *aELF, size_t aSize, const std::string &aName)
   : mStartPC(~0), // largest uint32_t
     mEndPC(0),
     mName(aName)
@@ -534,29 +529,29 @@ Table::Table(const void *aELF, size_t aSize, const std::string &aName)
   mEndPC += mLoadOffset;
 
   // Create a sorted index of the index to work around linker bugs.
-  const Entry *startTable =
-    reinterpret_cast<const Entry *>(mLoadOffset + exidxHdr->p_vaddr);
-  const Entry *endTable =
-    reinterpret_cast<const Entry *>(mLoadOffset + exidxHdr->p_vaddr
+  const EHEntry *startTable =
+    reinterpret_cast<const EHEntry *>(mLoadOffset + exidxHdr->p_vaddr);
+  const EHEntry *endTable =
+    reinterpret_cast<const EHEntry *>(mLoadOffset + exidxHdr->p_vaddr
                                     + exidxHdr->p_memsz);
   mEntries.reserve(endTable - startTable);
-  for (const Entry *i = startTable; i < endTable; ++i)
+  for (const EHEntry *i = startTable; i < endTable; ++i)
     mEntries.push_back(i);
   std::sort(mEntries.begin(), mEntries.end());
 }
 
 
-mozilla::Atomic<const AddrSpace*> AddrSpace::sCurrent(nullptr);
+mozilla::Atomic<const EHAddrSpace*> EHAddrSpace::sCurrent(nullptr);
 
-const AddrSpace *AddrSpace::Current(bool aSignalContext) {
-  const AddrSpace *space = sCurrent;
+const EHAddrSpace *EHAddrSpace::Current(bool aSignalContext) {
+  const EHAddrSpace *space = sCurrent;
   if (space)
     return space;
   if (aSignalContext)
     return nullptr;
 
   SharedLibraryInfo info = SharedLibraryInfo::GetInfoForSelf();
-  std::vector<Table> tables;
+  std::vector<EHTable> tables;
 
   for (size_t i = 0; i < info.GetSize(); ++i) {
     const SharedLibrary &lib = info.GetEntry(i);
@@ -567,12 +562,12 @@ const AddrSpace *AddrSpace::Current(bool aSignalContext) {
       // linked so as to need that treatment is the dynamic linker
       // itself.
       continue;
-    Table tab(reinterpret_cast<const void *>(lib.GetStart()),
+    EHTable tab(reinterpret_cast<const void *>(lib.GetStart()),
               lib.GetEnd() - lib.GetStart(), lib.GetName());
     if (tab)
       tables.push_back(tab);
   }
-  space = new AddrSpace(tables);
+  space = new EHAddrSpace(tables);
 
   if (!sCurrent.compareExchange(nullptr, space)) {
     delete space;
@@ -582,7 +577,7 @@ const AddrSpace *AddrSpace::Current(bool aSignalContext) {
 }
 
 
-State::State(const mcontext_t &context) {
+EHState::EHState(const mcontext_t &context) {
 #ifdef linux
   mRegs[0] = context.arm_r0;
   mRegs[1] = context.arm_r1;
@@ -601,10 +596,9 @@ State::State(const mcontext_t &context) {
   mRegs[14] = context.arm_lr;
   mRegs[15] = context.arm_pc;
 #else
-# error "Unhandled OS in mozilla::ehabi::State::State(const mcontext_t &)"
+# error "Unhandled OS for ARM EHABI unwinding"
 #endif
 }
 
-} // namesapce ehabi
 } // namespace mozilla
 
