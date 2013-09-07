@@ -313,7 +313,7 @@ void Sampler::Start() {
   LOG("Sampler started");
 
 #ifdef __ARM_EABI__
-  mozilla::ehabi::AddrSpace::Current(false);
+  mozilla::EHABIStackWalkInit();
 #endif
   SamplerRegistry::AddActiveSampler(this);
 

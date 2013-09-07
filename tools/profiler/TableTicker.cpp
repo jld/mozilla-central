@@ -54,8 +54,6 @@
 #endif
 #ifdef USE_EHABI_STACKWALK
  #include "EHABIStackWalk.h"
- #include "mozilla/Atomics.h"
- #include <pthread.h>
 #endif
 
 using std::string;
@@ -452,9 +450,6 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
 #ifdef USE_EHABI_STACKWALK
 void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample)
 {
-  const ehabi::AddrSpace *space = ehabi::AddrSpace::Current(true); // can fail
-  ucontext_t *ucontext = reinterpret_cast<ucontext_t *>(aSample->context);
-  ehabi::State state(ucontext->uc_mcontext);
   void *pc_array[1000];
   void *sp_array[1000];
   PCArray array = {
@@ -463,26 +458,10 @@ void TableTicker::doNativeBacktrace(ThreadProfile &aProfile, TickSample* aSample
     mozilla::ArrayLength(pc_array),
     0
   };
-  void *stackBase = aProfile.GetStackTop();
 
-  while (array.count < array.size) {
-    uint32_t pc = state[ehabi::R_PC], sp = state[ehabi::R_SP];
-    pc_array[array.count] = reinterpret_cast<void *>(pc);
-    sp_array[array.count] = reinterpret_cast<void *>(sp);
-    array.count++;
-
-    if (!space)
-      break;
-    const ehabi::Table *table = space->lookup(pc);
-    if (!table)
-      break;
-    const ehabi::Entry *entry = table->lookup(pc);
-    if (!entry)
-      break;
-    if (!state.unwind(entry, stackBase))
-      break;
-  }
-
+  ucontext_t *ucontext = reinterpret_cast<ucontext_t *>(aSample->context);
+  array.count = EHABIStackWalk(ucontext->uc_mcontext, aProfile.GetStackTop(),
+                               sp_array, pc_array, array.size);
   mergeNativeBacktrace(aProfile, array);
 }
 

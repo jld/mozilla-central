@@ -23,18 +23,113 @@
 #include "shared-libraries.h"
 #include "platform.h"
 
+#include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Endian.h"
 
 #include <algorithm>
 #include <elf.h>
+#include <stdint.h>
+#include <vector>
+#include <string>
 
 #ifndef PT_ARM_EXIDX
 #define PT_ARM_EXIDX 0x70000001
 #endif
 
+
 namespace mozilla {
+namespace ehabi {
+
+struct Entry;
+
+class State {
+public:
+  // Note that any core register can be used as a "frame pointer" to
+  // influence the unwinding process, so this must track all of them.
+  uint32_t mRegs[16];
+  bool unwind(const Entry *aEntry, const void *stackBase);
+  uint32_t &operator[](int i) { return mRegs[i]; }
+  const uint32_t &operator[](int i) const { return mRegs[i]; }
+  State(const mcontext_t &);
+};
+
+enum {
+  R_SP = 13,
+  R_LR = 14,
+  R_PC = 15
+};
+
+struct EntryHandle {
+  const Entry *mValue;
+  EntryHandle(const Entry *aEntry) : mValue(aEntry) { }
+};
+
+struct Table {
+  uint32_t mStartPC;
+  uint32_t mEndPC;
+  uint32_t mLoadOffset;
+  // In principle we should be able to binary-search the index section in
+  // place, but the ICS toolchain's linker is noncompliant and produces
+  // indices that aren't entirely sorted (e.g., libc).  So we have this:
+  std::vector<EntryHandle> mEntries;
+  std::string mName;
+
+  Table(const void *aELF, size_t aSize, const std::string &aName);
+  const Entry *lookup(uint32_t aPC) const;
+  operator bool() const { return mEntries.size() > 0; }
+  const std::string &name() const { return mName; }
+  uint32_t loadOffset() const { return mLoadOffset; }
+};
+
+class AddrSpace {
+  std::vector<uint32_t> mStarts;
+  std::vector<Table> mTables;
+  static mozilla::Atomic<const AddrSpace*> sCurrent;
+public:
+  explicit AddrSpace(const std::vector<Table>& aTables);
+  const Table *lookup(uint32_t aPC) const;
+  static const AddrSpace *Current(bool aSignalContext);
+};
+
+}
+
+
+void EHABIStackWalkInit()
+{
+  ehabi::AddrSpace::Current(false);
+}
+
+size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
+                      void **aSPs, void **aPCs, const size_t aNumFrames)
+{
+  const ehabi::AddrSpace *space = ehabi::AddrSpace::Current(true); // can fail
+  ehabi::State state(aContext);
+  size_t count = 0;
+
+  while (count < aNumFrames) {
+    uint32_t pc = state[ehabi::R_PC], sp = state[ehabi::R_SP];
+    aPCs[count] = reinterpret_cast<void *>(pc);
+    aSPs[count] = reinterpret_cast<void *>(sp);
+    count++;
+
+    if (!space)
+      break;
+    const ehabi::Table *table = space->lookup(pc);
+    if (!table)
+      break;
+    const ehabi::Entry *entry = table->lookup(pc);
+    if (!entry)
+      break;
+    if (!state.unwind(entry, stackBase))
+      break;
+  }
+  
+  return count;
+}
+
+
 namespace ehabi {
 
 struct PRel31 {
