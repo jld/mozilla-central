@@ -48,10 +48,10 @@ namespace mozilla {
 struct EHEntry;
 
 class EHState {
-public:
   // Note that any core register can be used as a "frame pointer" to
   // influence the unwinding process, so this must track all of them.
   uint32_t mRegs[16];
+public:
   bool unwind(const EHEntry *aEntry, const void *stackBase);
   uint32_t &operator[](int i) { return mRegs[i]; }
   const uint32_t &operator[](int i) const { return mRegs[i]; }
@@ -64,12 +64,14 @@ enum {
   R_PC = 15
 };
 
-struct EHEntryHandle {
+class EHEntryHandle {
   const EHEntry *mValue;
+public:
   EHEntryHandle(const EHEntry *aEntry) : mValue(aEntry) { }
+  const EHEntry *value() const { return mValue; }
 };
 
-struct EHTable {
+class EHTable {
   uint32_t mStartPC;
   uint32_t mEndPC;
   uint32_t mLoadOffset;
@@ -78,11 +80,13 @@ struct EHTable {
   // indices that aren't entirely sorted (e.g., libc).  So we have this:
   std::vector<EHEntryHandle> mEntries;
   std::string mName;
-
+public:
   EHTable(const void *aELF, size_t aSize, const std::string &aName);
   const EHEntry *lookup(uint32_t aPC) const;
   operator bool() const { return mEntries.size() > 0; }
   const std::string &name() const { return mName; }
+  uint32_t startPC() const { return mStartPC; }
+  uint32_t endPC() const { return mEndPC; }
   uint32_t loadOffset() const { return mLoadOffset; }
 };
 
@@ -133,7 +137,7 @@ size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
 
 
 struct PRel31 {
-  uint32_t bits() const { return mBits; }
+  uint32_t mBits;
   bool topBit() const { return mBits & 0x80000000; }
   uint32_t value() const { return mBits & 0x7fffffff; }
   int32_t offset() const { return (static_cast<int32_t>(mBits) << 1) >> 1; }
@@ -141,7 +145,6 @@ struct PRel31 {
     return reinterpret_cast<const char *>(this) + offset();
   }
 private:
-  uint32_t mBits;
   PRel31(const PRel31 &copied) MOZ_DELETE;
   PRel31() MOZ_DELETE;
 };
@@ -156,17 +159,6 @@ private:
 
 
 class EHInterp {
-private:
-  // FIXME: GCC seems to think that `mState` can alias `*this`.
-  EHState &mState;
-  uint32_t mStackLimit;
-  uint32_t mStackBase;
-  const uint32_t *mNextWord;
-  uint32_t mWord;
-  uint8_t mWordsLeft;
-  uint8_t mBytesLeft;
-  bool mFailed;
-
 public:
   EHInterp(EHState &aState, const EHEntry *aEntry,
            uint32_t aStackLimit, uint32_t aStackBase)
@@ -180,12 +172,12 @@ public:
     const PRel31 &exidx = aEntry->exidx;
     uint32_t firstWord;
 
-    if (exidx.bits() == 1) {  // EXIDX_CANTUNWIND
+    if (exidx.mBits == 1) {  // EXIDX_CANTUNWIND
       mFailed = true;
       return;
     }
     if (exidx.topBit()) {
-      firstWord = exidx.bits();
+      firstWord = exidx.mBits;
     } else {
       mNextWord = reinterpret_cast<const uint32_t *>(exidx.compute());
       firstWord = *mNextWord++;
@@ -207,7 +199,19 @@ public:
     }
   }
 
+  bool unwind();
+
 private:
+  // FIXME: GCC seems to think that `mState` can alias `*this`.
+  EHState &mState;
+  uint32_t mStackLimit;
+  uint32_t mStackBase;
+  const uint32_t *mNextWord;
+  uint32_t mWord;
+  uint8_t mWordsLeft;
+  uint8_t mBytesLeft;
+  bool mFailed;
+
   enum {
     I_ADDSP    = 0x00, // 0sxxxxxx (subtract if s)
     M_ADDSP    = 0x80,
@@ -280,9 +284,6 @@ private:
       checkStack();
     }
   }
-
-public:
-  bool unwind();
 };
 
 
@@ -425,7 +426,7 @@ bool EHInterp::unwind() {
 
 
 bool operator<(const EHTable &lhs, const EHTable &rhs) {
-  return lhs.mStartPC < rhs.mEndPC;
+  return lhs.startPC() < rhs.endPC();
 }
 
 // Async signal unsafe.
@@ -436,9 +437,9 @@ EHAddrSpace::EHAddrSpace(const std::vector<EHTable>& aTables)
   DebugOnly<uint32_t> lastEnd = 0;
   for (std::vector<EHTable>::iterator i = mTables.begin();
        i != mTables.end(); ++i) {
-    MOZ_ASSERT(i->mStartPC >= lastEnd);
-    mStarts.push_back(i->mStartPC);
-    lastEnd = i->mEndPC;
+    MOZ_ASSERT(i->startPC() >= lastEnd);
+    mStarts.push_back(i->startPC());
+    lastEnd = i->endPC();
   }
 }
 
@@ -446,14 +447,14 @@ const EHTable *EHAddrSpace::lookup(uint32_t aPC) const {
   ptrdiff_t i = (std::upper_bound(mStarts.begin(), mStarts.end(), aPC)
                  - mStarts.begin()) - 1;
 
-  if (i < 0 || aPC >= mTables[i].mEndPC)
+  if (i < 0 || aPC >= mTables[i].endPC())
     return 0;
   return &mTables[i];
 }
 
 
 bool operator<(const EHEntryHandle &lhs, const EHEntryHandle &rhs) {
-  return lhs.mValue->startPC.compute() < rhs.mValue->startPC.compute();
+  return lhs.value()->startPC.compute() < rhs.value()->startPC.compute();
 }
 
 const EHEntry *EHTable::lookup(uint32_t aPC) const {
@@ -464,17 +465,17 @@ const EHEntry *EHTable::lookup(uint32_t aPC) const {
   std::vector<EHEntryHandle>::const_iterator begin = mEntries.begin();
   std::vector<EHEntryHandle>::const_iterator end = mEntries.end();
   MOZ_ASSERT(begin < end);
-  if (aPC < reinterpret_cast<uint32_t>(begin->mValue->startPC.compute()))
+  if (aPC < reinterpret_cast<uint32_t>(begin->value()->startPC.compute()))
     return NULL;
 
   while (end - begin > 1) {
     std::vector<EHEntryHandle>::const_iterator mid = begin + (end - begin) / 2;
-    if (aPC < reinterpret_cast<uint32_t>(mid->mValue->startPC.compute()))
+    if (aPC < reinterpret_cast<uint32_t>(mid->value()->startPC.compute()))
       end = mid;
     else
       begin = mid;
   }
-  return begin->mValue;
+  return begin->value();
 }
 
 
