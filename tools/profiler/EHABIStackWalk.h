@@ -6,8 +6,8 @@
 
 /*
  * This is an implementation of stack unwinding according to a subset
- * of the ARM Exception Handling ABI, as described in:
- *   http://infocenter.arm.com/help/topic/com.arm.doc.ihi0038a/IHI0038A_ehabi.pdf
+ * of the ARM Exception Handling ABI; see the comment at the top of
+ * the .cpp file for details.
  */
 
 #ifndef mozilla_EHABIStackWalk_h__

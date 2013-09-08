@@ -16,6 +16,10 @@
  * Because the exception handling info may not be accurate for all
  * possible places where an async signal could occur (e.g., in a
  * prologue or epilogue), this bounds-checks all stack accesses.
+ *
+ * This file uses "struct" for structures in the exception tables and
+ * "class" otherwise.  We should avoid violating the C++11
+ * standard-layout rules in the former.
  */
 
 #include "EHABIStackWalk.h"
@@ -424,6 +428,7 @@ bool operator<(const EHTable &lhs, const EHTable &rhs) {
   return lhs.mStartPC < rhs.mEndPC;
 }
 
+// Async signal unsafe.
 EHAddrSpace::EHAddrSpace(const std::vector<EHTable>& aTables)
   : mTables(aTables)
 {
@@ -481,6 +486,7 @@ static const unsigned char hostEndian = ELFDATA2MSB;
 #error "No endian?"
 #endif
 
+// Async signal unsafe.  (Note use of std::vector::reserve.)
 EHTable::EHTable(const void *aELF, size_t aSize, const std::string &aName)
   : mStartPC(~0), // largest uint32_t
     mEndPC(0),
@@ -544,12 +550,13 @@ EHTable::EHTable(const void *aELF, size_t aSize, const std::string &aName)
 
 mozilla::Atomic<const EHAddrSpace*> EHAddrSpace::sCurrent(nullptr);
 
-// Needs comment.
+// Async signal safe; can fail if Update() hasn't returned yet.
 const EHAddrSpace *EHAddrSpace::Get() {
   return sCurrent;
 }
 
-// Needs comment.
+// Collect unwinding information from loaded objects.  Calls after the
+// first have no effect.  Async signal unsafe.
 void EHAddrSpace::Update() {
   const EHAddrSpace *space = sCurrent;
   if (space)
