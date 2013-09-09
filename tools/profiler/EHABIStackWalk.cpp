@@ -83,7 +83,7 @@ class EHTable {
 public:
   EHTable(const void *aELF, size_t aSize, const std::string &aName);
   const EHEntry *lookup(uint32_t aPC) const;
-  operator bool() const { return mEntries.size() > 0; }
+  bool isValid() const { return mEntries.size() > 0; }
   const std::string &name() const { return mName; }
   uint32_t startPC() const { return mStartPC; }
   uint32_t endPC() const { return mEndPC; }
@@ -577,7 +577,7 @@ void EHAddrSpace::Update() {
       continue;
     EHTable tab(reinterpret_cast<const void *>(lib.GetStart()),
               lib.GetEnd() - lib.GetStart(), lib.GetName());
-    if (tab)
+    if (tab.isValid())
       tables.push_back(tab);
   }
   space = new EHAddrSpace(tables);
