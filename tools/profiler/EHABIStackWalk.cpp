@@ -47,17 +47,6 @@ namespace mozilla {
 
 struct EHEntry;
 
-class EHState {
-  // Note that any core register can be used as a "frame pointer" to
-  // influence the unwinding process, so this must track all of them.
-  uint32_t mRegs[16];
-public:
-  bool unwind(const EHEntry *aEntry, const void *stackBase);
-  uint32_t &operator[](int i) { return mRegs[i]; }
-  const uint32_t &operator[](int i) const { return mRegs[i]; }
-  EHState(const mcontext_t &);
-};
-
 enum {
   R_SP = 13,
   R_LR = 14,
@@ -102,43 +91,6 @@ public:
 };
 
 
-void EHABIStackWalkInit()
-{
-  EHAddrSpace::Update();
-}
-
-size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
-                      void **aSPs, void **aPCs, const size_t aNumFrames)
-{
-  const EHAddrSpace *space = EHAddrSpace::Get();
-  EHState state(aContext);
-  size_t count = 0;
-
-  while (count < aNumFrames) {
-    uint32_t pc = state[R_PC], sp = state[R_SP];
-    aPCs[count] = reinterpret_cast<void *>(pc);
-    aSPs[count] = reinterpret_cast<void *>(sp);
-    count++;
-
-    if (!space)
-      break;
-    // TODO: cache these lookups.  Binary-searching libxul is
-    // expensive (possibly more expensive than doing the actual
-    // unwind), and even a small cache should help.
-    const EHTable *table = space->lookup(pc);
-    if (!table)
-      break;
-    const EHEntry *entry = table->lookup(pc);
-    if (!entry)
-      break;
-    if (!state.unwind(entry, stackBase))
-      break;
-  }
-  
-  return count;
-}
-
-
 struct PRel31 {
   uint32_t mBits;
   bool topBit() const { return mBits & 0x80000000; }
@@ -163,60 +115,39 @@ private:
 
 class EHInterp {
 public:
-  EHInterp(EHState &aState, const EHEntry *aEntry,
-           uint32_t aStackLimit, uint32_t aStackBase)
-    : mState(aState),
-      mStackLimit(aStackLimit),
-      mStackBase(aStackBase),
+  EHInterp(const mcontext_t &aContext, uint32_t aStackBase)
+    : mStackBase(aStackBase),
       mNextWord(0),
       mWordsLeft(0),
-      mFailed(false)
+      mFailed(false),
+      mDone(true)
   {
-    const PRel31 &exidx = aEntry->exidx;
-    uint32_t firstWord;
-
-    if (exidx.mBits == 1) {  // EXIDX_CANTUNWIND
-      mFailed = true;
-      return;
-    }
-    if (exidx.topBit()) {
-      firstWord = exidx.mBits;
-    } else {
-      mNextWord = reinterpret_cast<const uint32_t *>(exidx.compute());
-      firstWord = *mNextWord++;
-    }
-
-    switch (firstWord >> 24) {
-    case 0x80: // short
-      mWord = firstWord << 8;
-      mBytesLeft = 3;
-      break;
-    case 0x81: case 0x82: // long; catch descriptor size ignored
-      mWord = firstWord << 16;
-      mBytesLeft = 2;
-      mWordsLeft = (firstWord >> 16) & 0xff;
-      break;
-    default:
-      // unknown personality
-      mFailed = true;
-    }
+    setRegs(aContext);
   }
 
-  bool unwind();
+  bool unwind(const EHEntry *aEntry) {
+    initialize(aEntry);
+    mRegs[R_PC] = 0;
+    checkStack();
+    while (!mFailed && !mDone)
+      step();
+    return !mFailed;
+  }
+
+  uint32_t getReg(int regno) const {
+    return mRegs[regno];
+  }
 
 private:
-  // TODO: GCC has been observed not CSEing repeated reads of
-  // mState[R_SP] with writes to mFailed between them, suggesting that
-  // it hasn't determined that they can't alias and is thus missing
-  // optimization opportunities.
-  EHState &mState;
-  uint32_t mStackLimit;
+  uint32_t mRegs[16];
+  uint32_t mStackLimit; // inclusive, not exclusive as in APCS
   uint32_t mStackBase;
   const uint32_t *mNextWord;
   uint32_t mWord;
   uint8_t mWordsLeft;
   uint8_t mBytesLeft;
   bool mFailed;
+  bool mDone;
 
   enum {
     I_ADDSP    = 0x00, // 0sxxxxxx (subtract if s)
@@ -240,6 +171,10 @@ private:
     M_POPFDD8  = 0xf8
   };
 
+  void setRegs(const mcontext_t &aContext);
+  void initialize(const EHEntry *aEntry);
+  void step(void);
+
   uint8_t next() {
     if (mBytesLeft == 0) {
       if (mWordsLeft == 0) {
@@ -254,11 +189,11 @@ private:
     return mWord;
   }
 
-  uint32_t &vSP() { return mState[R_SP]; }
+  uint32_t &vSP() { return mRegs[R_SP]; }
   uint32_t *ptrSP() { return reinterpret_cast<uint32_t *>(vSP()); }
 
   void checkStackBase() { if (vSP() > mStackBase) mFailed = true; }
-  void checkStackLimit() { if (vSP() <= mStackLimit) mFailed = true; }
+  void checkStackLimit() { if (vSP() < mStackLimit) mFailed = true; }
   void checkStackAlign() { if ((vSP() & 3) != 0) mFailed = true; }
   void checkStack() {
     checkStackBase();
@@ -269,15 +204,17 @@ private:
   void popRange(uint8_t first, uint8_t last, uint16_t mask) {
     bool hasSP = false;
     uint32_t tmpSP;
-    if (mask == 0)
+    if (mask == 0) {
       mFailed = true;
+      return;
+    }
     for (uint8_t r = first; r <= last; ++r) {
       if (mask & 1) {
         if (r == R_SP) {
           hasSP = true;
           tmpSP = *ptrSP();
         } else
-          mState[r] = *ptrSP();
+          mRegs[r] = *ptrSP();
         vSP() += 4;
         checkStackBase();
         if (mFailed)
@@ -293,141 +230,169 @@ private:
 };
 
 
-bool EHState::unwind(const EHEntry *aEntry, const void *stackLimit) {
-  EHInterp interp(*this, aEntry, mRegs[R_SP] - 4,
-                  reinterpret_cast<uint32_t>(stackLimit));
+void EHInterp::initialize(const EHEntry *aEntry)
+{
+  const PRel31 &exidx = aEntry->exidx;
+  uint32_t firstWord;
 
-  return interp.unwind();
-}
+  mDone = false;
+  if (exidx.mBits == 1) {  // EXIDX_CANTUNWIND
+    mFailed = true;
+    return;
+  }
+  if (exidx.topBit()) {
+    firstWord = exidx.mBits;
+  } else {
+    mNextWord = reinterpret_cast<const uint32_t *>(exidx.compute());
+    firstWord = *mNextWord++;
+  }
 
-bool EHInterp::unwind() {
-  mState[R_PC] = 0;
-  checkStack();
-  while (!mFailed) {
-    uint8_t insn = next();
-#if 0
-    LOGF("unwind insn = %02x", (unsigned)insn);
-#endif
-    // Try to put the common cases first.
-
-    // 00xxxxxx: vsp = vsp + (xxxxxx << 2) + 4
-    // 01xxxxxx: vsp = vsp - (xxxxxx << 2) - 4
-    if ((insn & M_ADDSP) == I_ADDSP) {
-      uint32_t offset = ((insn & 0x3f) << 2) + 4;
-      if (insn & 0x40) {
-        vSP() -= offset;
-        checkStackLimit();
-      } else {
-        vSP() += offset;
-        checkStackBase();
-      }
-      continue;
-    }
-
-    // 10100nnn: Pop r4-r[4+nnn]
-    // 10101nnn: Pop r4-r[4+nnn], r14
-    if ((insn & M_POPN) == I_POPN) {
-      uint8_t n = (insn & 0x07) + 1;
-      bool lr = insn & 0x08;
-      uint32_t *ptr = ptrSP();
-      vSP() += (n + (lr ? 1 : 0)) * 4;
-      checkStackBase();
-      for (uint8_t r = 4; r < 4 + n; ++r)
-        mState[r] = *ptr++;
-      if (lr)
-        mState[R_LR] = *ptr++;
-      continue;
-    }
-
-    // 1011000: Finish
-    if (insn == I_FINISH) {
-      if (mState[R_PC] == 0)
-        mState[R_PC] = mState[R_LR];
-      return true;
-    }
-
-    // 1001nnnn: Set vsp = r[nnnn]
-    if ((insn & M_MOVSP) == I_MOVSP) {
-      vSP() = mState[insn & 0x0f];
-      checkStack();
-      continue;
-    }
-
-    // 11001000 sssscccc: Pop VFP regs D[16+ssss]-D[16+ssss+cccc] (as FLDMFDD)
-    // 11001001 sssscccc: Pop VFP regs D[ssss]-D[ssss+cccc] (as FLDMFDD)
-    if ((insn & M_POPFDD) == I_POPFDD) {
-      uint8_t n = (next() & 0x0f) + 1;
-      // Note: if the 16+ssss+cccc > 31, the encoding is reserved.
-      // As the space is currently unused, we don't try to check.
-      vSP() += 8 * n;
-      checkStackBase();
-      continue;
-    }
-
-    // 11010nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDD)
-    if ((insn & M_POPFDD8) == I_POPFDD8) {
-      uint8_t n = (insn & 0x07) + 1;
-      vSP() += 8 * n;
-      checkStackBase();
-      continue;
-    }
-
-    // 10110010 uleb128: vsp = vsp + 0x204 + (uleb128 << 2)
-    if (insn == I_ADDSPBIG) {
-      uint32_t acc = 0;
-      uint8_t shift = 0;
-      uint8_t byte;
-      do {
-        if (shift >= 32)
-          return false;
-        byte = next();
-        acc |= (byte & 0x7f) << shift;
-        shift += 7;
-      } while (byte & 0x80);
-      uint32_t offset = 0x204 + (acc << 2);
-      // The calculations above could have overflowed.
-      // But the one we care about is this:
-      if (vSP() + offset < vSP())
-        mFailed = true;
-      vSP() += offset;
-      // ...so that this is the only other check needed:
-      checkStackBase();
-      continue;
-    }
-
-    // 1000iiii iiiiiiii (i not all 0): Pop under masks {r15-r12}, {r11-r4}
-    if ((insn & M_POPMASK) == I_POPMASK) {
-      popRange(4, 15, ((insn & 0x0f) << 8) | next());
-      continue;
-    }
-
-    // 1011001 0000iiii (i not all 0): Pop under mask {r3-r0}
-    if (insn == I_POPLO) {
-      popRange(0, 3, next() & 0x0f);
-      continue;
-    }
-
-    // 10110011 sssscccc: Pop VFP regs D[ssss]-D[ssss+cccc] (as FLDMFDX)
-    if (insn == I_POPFDX) {
-      uint8_t n = (next() & 0x0f) + 1;
-      vSP() += 8 * n + 4;
-      checkStackBase();
-      continue;
-    }
-
-    // 10111nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDX)
-    if ((insn & M_POPFDX8) == I_POPFDX8) {
-      uint8_t n = (insn & 0x07) + 1;
-      vSP() += 8 * n + 4;
-      checkStackBase();
-      continue;
-    }
-
-    // unhandled instruction
-    LOGF("Unhandled EHABI instruction 0x%02x", insn);
+  switch (firstWord >> 24) {
+  case 0x80: // short
+    mWord = firstWord << 8;
+    mBytesLeft = 3;
+    break;
+  case 0x81: case 0x82: // long; catch descriptor size ignored
+    mWord = firstWord << 16;
+    mBytesLeft = 2;
+    mWordsLeft = (firstWord >> 16) & 0xff;
+    break;
+  default:
+    // unknown personality
     mFailed = true;
   }
-  return false;
+    
+  mStackLimit = mRegs[R_SP];
+}
+
+void EHInterp::step() {
+  uint8_t insn = next();
+#if 0
+  LOGF("unwind insn = %02x", (unsigned)insn);
+#endif
+  // Try to put the common cases first.
+
+  // 00xxxxxx: vsp = vsp + (xxxxxx << 2) + 4
+  // 01xxxxxx: vsp = vsp - (xxxxxx << 2) - 4
+  if ((insn & M_ADDSP) == I_ADDSP) {
+    uint32_t offset = ((insn & 0x3f) << 2) + 4;
+    if (insn & 0x40) {
+      vSP() -= offset;
+      checkStackLimit();
+    } else {
+      vSP() += offset;
+      checkStackBase();
+    }
+    return;
+  }
+
+  // 10100nnn: Pop r4-r[4+nnn]
+  // 10101nnn: Pop r4-r[4+nnn], r14
+  if ((insn & M_POPN) == I_POPN) {
+    uint8_t n = (insn & 0x07) + 1;
+    bool lr = insn & 0x08;
+    uint32_t *ptr = ptrSP();
+    vSP() += (n + (lr ? 1 : 0)) * 4;
+    checkStackBase();
+    if (mFailed)
+      return;
+    for (uint8_t r = 4; r < 4 + n; ++r)
+      mRegs[r] = *ptr++;
+    if (lr)
+      mRegs[R_LR] = *ptr++;
+    return;
+  }
+
+  // 1011000: Finish
+  if (insn == I_FINISH) {
+    mDone = true;
+    if (mRegs[R_PC] == 0)
+      mRegs[R_PC] = mRegs[R_LR];
+    return;
+  }
+
+  // 1001nnnn: Set vsp = r[nnnn]
+  if ((insn & M_MOVSP) == I_MOVSP) {
+    vSP() = mRegs[insn & 0x0f];
+    checkStack();
+    return;
+  }
+
+  // 11001000 sssscccc: Pop VFP regs D[16+ssss]-D[16+ssss+cccc] (as FLDMFDD)
+  // 11001001 sssscccc: Pop VFP regs D[ssss]-D[ssss+cccc] (as FLDMFDD)
+  if ((insn & M_POPFDD) == I_POPFDD) {
+    uint8_t n = (next() & 0x0f) + 1;
+    // Note: if the 16+ssss+cccc > 31, the encoding is reserved.
+    // As the space is currently unused, we don't try to check.
+    vSP() += 8 * n;
+    checkStackBase();
+    return;
+  }
+
+  // 11010nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDD)
+  if ((insn & M_POPFDD8) == I_POPFDD8) {
+    uint8_t n = (insn & 0x07) + 1;
+    vSP() += 8 * n;
+    checkStackBase();
+    return;
+  }
+
+  // 10110010 uleb128: vsp = vsp + 0x204 + (uleb128 << 2)
+  if (insn == I_ADDSPBIG) {
+    uint32_t acc = 0;
+    uint8_t shift = 0;
+    uint8_t byte;
+    do {
+      if (shift >= 32) {
+        mFailed = true;
+        return;
+      }
+      byte = next();
+      acc |= (byte & 0x7f) << shift;
+      shift += 7;
+    } while (byte & 0x80);
+    uint32_t offset = 0x204 + (acc << 2);
+    // The calculations above could have overflowed.
+    // But the one we care about is this:
+    if (vSP() + offset < vSP())
+      mFailed = true;
+    vSP() += offset;
+    // ...so that this is the only other check needed:
+    checkStackBase();
+    return;
+  }
+
+  // 1000iiii iiiiiiii (i not all 0): Pop under masks {r15-r12}, {r11-r4}
+  if ((insn & M_POPMASK) == I_POPMASK) {
+    popRange(4, 15, ((insn & 0x0f) << 8) | next());
+    return;
+  }
+
+  // 1011001 0000iiii (i not all 0): Pop under mask {r3-r0}
+  if (insn == I_POPLO) {
+    popRange(0, 3, next() & 0x0f);
+    return;
+  }
+
+  // 10110011 sssscccc: Pop VFP regs D[ssss]-D[ssss+cccc] (as FLDMFDX)
+  if (insn == I_POPFDX) {
+    uint8_t n = (next() & 0x0f) + 1;
+    vSP() += 8 * n + 4;
+    checkStackBase();
+    return;
+  }
+
+  // 10111nnn: Pop VFP regs D[8]-D[8+nnn] (as FLDMFDX)
+  if ((insn & M_POPFDX8) == I_POPFDX8) {
+    uint8_t n = (insn & 0x07) + 1;
+    vSP() += 8 * n + 4;
+    checkStackBase();
+    return;
+  }
+
+  // unhandled instruction
+  LOGF("Unhandled EHABI instruction 0x%02x", insn);
+  mFailed = true;
 }
 
 
@@ -595,7 +560,44 @@ void EHAddrSpace::Update() {
 }
 
 
-EHState::EHState(const mcontext_t &context) {
+void EHABIStackWalkInit()
+{
+  EHAddrSpace::Update();
+}
+
+size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
+                      void **aSPs, void **aPCs, const size_t aNumFrames)
+{
+  const EHAddrSpace *space = EHAddrSpace::Get();
+  EHInterp interp(aContext, reinterpret_cast<uint32_t>(stackBase));
+  size_t count = 0;
+
+  while (count < aNumFrames) {
+    uint32_t pc = interp.getReg(R_PC), sp = interp.getReg(R_SP);
+    aPCs[count] = reinterpret_cast<void *>(pc);
+    aSPs[count] = reinterpret_cast<void *>(sp);
+    count++;
+
+    if (!space)
+      break;
+    // TODO: cache these lookups.  Binary-searching libxul is
+    // expensive (possibly more expensive than doing the actual
+    // unwind), and even a small cache should help.
+    const EHTable *table = space->lookup(pc);
+    if (!table)
+      break;
+    const EHEntry *entry = table->lookup(pc);
+    if (!entry)
+      break;
+    if (!interp.unwind(entry))
+      break;
+  }
+  
+  return count;
+}
+
+
+void EHInterp::setRegs(const mcontext_t &context) {
 #ifdef linux
   mRegs[0] = context.arm_r0;
   mRegs[1] = context.arm_r1;
