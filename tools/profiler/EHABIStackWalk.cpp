@@ -122,6 +122,9 @@ size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
 
     if (!space)
       break;
+    // TODO: cache these lookups.  Binary-searching libxul is
+    // expensive (possibly more expensive than doing the actual
+    // unwind), and even a small cache should help.
     const EHTable *table = space->lookup(pc);
     if (!table)
       break;
@@ -202,7 +205,11 @@ public:
   bool unwind();
 
 private:
-  // FIXME: GCC seems to think that `mState` can alias `*this`.
+  // TODO: GCC has been observed not CSEing repeated reads of
+  // mState[R_SP] with writes to mFailed between them, suggesting that
+  // it hasn't determined that they can't alias and is thus missing
+  // optimization opportunities.  So, we may want to flatten EHState
+  // into this class; this may also make the code simpler.
   EHState &mState;
   uint32_t mStackLimit;
   uint32_t mStackBase;
