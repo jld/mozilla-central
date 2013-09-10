@@ -69,7 +69,9 @@
 #include "nsThreadUtils.h"
 #include "TableTicker.h"
 #include "UnwinderThread2.h"
-#ifdef __ARM_EABI__
+#if defined(__ARM_EABI__) && defined(MOZ_WIDGET_GONK)
+ // Should also work on other Android and ARM Linux, but not tested there yet.
+#define USE_EHABI_STACKWALK
 #include "EHABIStackWalk.h"
 #endif
 
@@ -312,7 +314,7 @@ Sampler::~Sampler() {
 void Sampler::Start() {
   LOG("Sampler started");
 
-#ifdef __ARM_EABI__
+#ifdef USE_EHABI_STACKWALK
   mozilla::EHABIStackWalkInit();
 #endif
   SamplerRegistry::AddActiveSampler(this);
