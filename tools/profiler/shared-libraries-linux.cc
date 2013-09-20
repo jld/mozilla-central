@@ -15,18 +15,7 @@
 #include "shared-libraries.h"
 
 #if !defined(__GLIBC__) && ANDROID_VERSION < 18
-/* a crapy version of getline, because it's not included in old bionics */
-static ssize_t getline(char **lineptr, size_t *n, FILE *stream)
-{
- char *ret;
- if (!*lineptr) {
-   *lineptr = (char*)malloc(4096);
- }
- ret = fgets(*lineptr, 4096, stream);
- if (!ret)
-   return 0;
- return strlen(*lineptr);
-}
+extern "C" ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 #endif
 
 #if !defined(MOZ_WIDGET_GONK)

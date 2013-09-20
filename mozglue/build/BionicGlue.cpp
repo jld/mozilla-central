@@ -254,3 +254,42 @@ extern "C" NS_EXPORT size_t __wrap_strspn(const char * a0, const char * a1) { re
 extern "C" NS_EXPORT int __wrap_strcoll(const char * a0, const char * a1) { return __real_strcoll(a0, a1); }
 extern "C" NS_EXPORT size_t __wrap_strxfrm(char * a0, const char * a1, size_t a2) { return __real_strxfrm(a0, a1, a2); }
 #endif
+
+
+extern "C" NS_EXPORT ssize_t
+getdelim(char **lineptr, size_t *n, int delim, FILE *stream)
+{
+	char *rv;
+	size_t so_far = 0;
+
+	if (!*lineptr) {
+		*n = 64;
+		*lineptr = reinterpret_cast<char *>(malloc(*n));
+	}
+	for (;;) {
+		size_t this_time;
+
+		rv = fgets(*lineptr + so_far, *n - so_far, stream);
+		if (!rv) {
+			if (so_far == 0) {
+				return -1;
+			} else {
+				break;
+			}
+		}
+		this_time = strlen(*lineptr + so_far);
+		so_far += this_time;
+		if ((*lineptr)[so_far - 1] == delim) {
+			break;
+		}
+		*n *= 2;
+		*lineptr = reinterpret_cast<char *>(realloc(*lineptr, *n));
+	}
+	return so_far;
+}
+
+extern "C" NS_EXPORT ssize_t
+getline(char **lineptr, size_t *n, FILE *stream)
+{
+  return getdelim(lineptr, n, '\n', stream);
+}
