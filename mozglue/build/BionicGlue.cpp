@@ -254,3 +254,46 @@ extern "C" NS_EXPORT size_t __wrap_strspn(const char * a0, const char * a1) { re
 extern "C" NS_EXPORT int __wrap_strcoll(const char * a0, const char * a1) { return __real_strcoll(a0, a1); }
 extern "C" NS_EXPORT size_t __wrap_strxfrm(char * a0, const char * a1, size_t a2) { return __real_strxfrm(a0, a1, a2); }
 #endif
+
+
+// ICS (and older) Bionic doesn't implement getline.
+// JB Bionic does, but it has non-overrideable calls to its own malloc/realloc,
+// which is bad when the caller passes it to free() and gets jemalloc instead.
+extern "C" NS_EXPORT ssize_t
+getline(char **lineptr, size_t *n, FILE *stream)
+{
+  char *rv;
+  size_t so_far = 0;
+
+  if (*lineptr == NULL || *n == 0) {
+    // Yes, calling with *n == 0 && *lineptr != NULL is permitted.
+    // In that case, *lineptr is free()able but nothing else is known about it.
+    *n = 64;
+    *lineptr = reinterpret_cast<char *>(realloc(*lineptr, *n));
+  }
+  for (;;) {
+    size_t this_time;
+
+    // Append to whatever we've read previously.
+    rv = fgets(*lineptr + so_far, *n - so_far, stream);
+    if (!rv) {
+      if (so_far == 0)
+        return -1;
+      else
+        break;
+    }
+    this_time = strlen(*lineptr + so_far);
+    so_far += this_time;
+    // End of line found?
+    if ((*lineptr)[so_far - 1] == '\n')
+      break;
+    // Short read => EOF.
+    if (so_far + 1 < *n)
+      break;
+    // Otherwise, expand and read more.
+    // Note that *n will always be nonzero here.
+    *n *= 2;
+    *lineptr = reinterpret_cast<char *>(realloc(*lineptr, *n));
+  }
+  return so_far;
+}
