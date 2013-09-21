@@ -100,6 +100,8 @@
   ALLOW_SYSCALL(setpriority), \
   ALLOW_SYSCALL(sigprocmask), \
   ALLOW_SYSCALL(sched_setscheduler), \
+  ALLOW_SYSCALL(sigaction), \
+  ALLOW_SYSCALL(tgkill), \
   /* Always last and always OK calls */ \
   SECCOMP_WHITELIST_ADD \
   /* restart_syscall is called internally, generally when debugging */ \
