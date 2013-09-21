@@ -996,6 +996,46 @@ class MacroAssembler : public MacroAssemblerSpecific
 
   public:
 
+    // This function push one register on the stack to remember if the a mark is
+    // on the SPS stack.
+    void spsMarkJit(SPSProfiler *p, Register framePtr, Register temp) {
+        Label spsNotEnabled;
+        uint32_t *enabledAddr = p->addressOfEnabled();
+        loadPtr(AbsoluteAddress(enabledAddr), ebx);
+        push(ebx); // +4: Did we push an sps frame.
+        branch32(Assembler::Equal, ebx, Imm32(0), &spsNotEnabled);
+
+        Label stackFull;
+        spsProfileEntryAddress(p, 0, temp, &stackFull);
+
+        const char *str = "EnterJit";
+        storePtr(ImmWord(str),          Address(temp, ProfileEntry::offsetOfString()));
+        storePtr(framePtr,              Address(temp, ProfileEntry::offsetOfStackAddress()));
+        storePtr(ImmWord(uintptr_t(0)), Address(temp, ProfileEntry::offsetOfScript()));
+        store32(Imm32(ProfileEntry::NullPCIndex), Address(temp, ProfileEntry::offsetOfPCIdx()));
+
+        /* Always increment the stack size, whether or not we actually pushed. */
+        bind(&stackFull);
+        movePtr(ImmWord(p->sizePointer()), temp);
+        add32(Imm32(1), Address(temp, 0));
+
+        // Finish pushing the sps frame if enabled.
+        bind(&spsNotEnabled);
+    }
+
+    void spsUnmarkJit(SPSProfiler *p, Register temp) {
+        Label spsNotEnabled;
+        pop(ebx); // +4: Was the profiler enabled.
+        branch32(Assembler::Equal, ebx, Imm32(0), &spsNotEnabled);
+
+        movePtr(ImmWord(p->addressOfSizePointer()), temp);
+        loadPtr(Address(temp, 0), temp);
+        add32(Imm32(-1), Address(temp, 0));
+
+        // Finish pushing the sps frame if enabled.
+        bind(&spsNotEnabled);
+    }
+
     // These functions are needed by the IonInstrumentation interface defined in
     // vm/SPSProfiler.h.  They will modify the pseudostack provided to SPS to
     // perform the actual instrumentation.
