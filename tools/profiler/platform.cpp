@@ -626,7 +626,7 @@ void mozilla_sampler_unlock()
 
 bool mozilla_sampler_register_thread(const char* aName, void* stackTop)
 {
-#ifndef MOZ_WIDGET_GONK
+#ifndef MOZ_WIDGET_BEES
   PseudoStack* stack = new PseudoStack();
   tlsPseudoStack.set(stack);
 
@@ -638,7 +638,7 @@ bool mozilla_sampler_register_thread(const char* aName, void* stackTop)
 
 void mozilla_sampler_unregister_thread()
 {
-#ifndef MOZ_WIDGET_GONK
+#ifndef MOZ_WIDGET_BEES
   Sampler::UnregisterCurrentThread();
 
   PseudoStack *stack = tlsPseudoStack.get();
