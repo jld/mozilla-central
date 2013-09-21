@@ -1001,22 +1001,22 @@ class MacroAssembler : public MacroAssemblerSpecific
     void spsMarkJit(SPSProfiler *p, Register framePtr, Register temp) {
         Label spsNotEnabled;
         uint32_t *enabledAddr = p->addressOfEnabled();
-        loadPtr(AbsoluteAddress(enabledAddr), ebx);
-        push(ebx); // +4: Did we push an sps frame.
-        branch32(Assembler::Equal, ebx, Imm32(0), &spsNotEnabled);
+        loadPtr(AbsoluteAddress(enabledAddr), temp);
+        push(temp); // +4: Did we push an sps frame.
+        branch32(Assembler::Equal, temp, Imm32(0), &spsNotEnabled);
 
         Label stackFull;
         spsProfileEntryAddress(p, 0, temp, &stackFull);
 
         const char *str = "EnterJit";
-        storePtr(ImmWord(str),          Address(temp, ProfileEntry::offsetOfString()));
+        storePtr(ImmPtr(str),           Address(temp, ProfileEntry::offsetOfString()));
         storePtr(framePtr,              Address(temp, ProfileEntry::offsetOfStackAddress()));
         storePtr(ImmWord(uintptr_t(0)), Address(temp, ProfileEntry::offsetOfScript()));
         store32(Imm32(ProfileEntry::NullPCIndex), Address(temp, ProfileEntry::offsetOfPCIdx()));
 
         /* Always increment the stack size, whether or not we actually pushed. */
         bind(&stackFull);
-        movePtr(ImmWord(p->sizePointer()), temp);
+        movePtr(ImmPtr(p->sizePointer()), temp);
         add32(Imm32(1), Address(temp, 0));
 
         // Finish pushing the sps frame if enabled.
@@ -1025,10 +1025,10 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void spsUnmarkJit(SPSProfiler *p, Register temp) {
         Label spsNotEnabled;
-        pop(ebx); // +4: Was the profiler enabled.
-        branch32(Assembler::Equal, ebx, Imm32(0), &spsNotEnabled);
+        pop(temp); // +4: Was the profiler enabled.
+        branch32(Assembler::Equal, temp, Imm32(0), &spsNotEnabled);
 
-        movePtr(ImmWord(p->addressOfSizePointer()), temp);
+        movePtr(ImmPtr(p->addressOfSizePointer()), temp);
         loadPtr(Address(temp, 0), temp);
         add32(Imm32(-1), Address(temp, 0));
 

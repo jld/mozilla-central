@@ -31,13 +31,13 @@ static const FloatRegisterSet NonVolatileFloatRegs =
                      (1 << FloatRegisters::d15));
 
 static void
-GenerateReturn(MacroAssembler &masm, int returnCode)
+GenerateReturn(MacroAssembler &masm, int returnCode, SPSProfiler *prof)
 {
     // Restore non-volatile floating point registers
     masm.transferMultipleByRuns(NonVolatileFloatRegs, IsLoad, StackPointer, IA);
 
-    // Get rid of the bogus r0 push.
-    masm.as_add(sp, sp, Imm8(4));
+    // Unwind the sps mark.
+    masm.spsUnmarkJit(prof, r8);
 
     // Set up return value
     masm.ma_mov(Imm32(returnCode), r0);
@@ -69,6 +69,8 @@ struct EnterJITStack
     double d14;
     double d15;
 
+    size_t hasSPSMark;
+
     // non-volatile registers.
     void *r4;
     void *r5;
@@ -80,8 +82,6 @@ struct EnterJITStack
     void *r11;
     // The abi does not expect r12 (ip) to be preserved
     void *lr;
-
-    size_t hasSPSMark;
 
     // Arguments.
     // code == r0
@@ -127,13 +127,15 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
     masm.transferReg(r11); // [sp,28]
     // The abi does not expect r12 (ip) to be preserved
     masm.transferReg(lr);  // [sp,32]
-    // The 5th argument is located at [sp, 40]
+    // The 5th argument is located at [sp, 36]
     masm.finishDataTransfer();
-    masm.transferMultipleByRuns(NonVolatileFloatRegs, IsStore, sp, DB);
 
-    // Push the EnterJIT sps mark.
-    masm.movePtr(Operand(sp, offsetof(EnterJITStack, lr)), r8);
+    // Push the EnterJIT sps mark.  "Frame pointer" = start of saved core regs.
+    masm.movePtr(sp, r8);
     masm.spsMarkJit(&cx->runtime()->spsProfiler, r8, r9);
+
+    // Push the float registers.
+    masm.transferMultipleByRuns(NonVolatileFloatRegs, IsStore, sp, DB);
 
     // Save stack pointer into r8
     masm.movePtr(sp, r8);
@@ -336,11 +338,8 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
     //   aasm->as_extdtr(IsStore, 64, true, Offset,
     //                   JSReturnReg_Data, EDtrAddr(r5, EDtrOffImm(0)));
 
-    // Unwind the sps mark.
-    masm.spsUnmarkJit(&cx->runtime()->spsProfiler, rbx);
-
     // Restore non-volatile registers and return.
-    GenerateReturn(masm, true);
+    GenerateReturn(masm, true, &cx->runtime()->spsProfiler);
 
     Linker linker(masm);
     IonCode *code = linker.newCode(cx, JSC::OTHER_CODE);
