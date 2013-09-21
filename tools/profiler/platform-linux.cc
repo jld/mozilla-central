@@ -443,10 +443,15 @@ static void StartSignalHandler(int signal, siginfo_t* info, void* context) {
   char thread[256];
 
   // TODO support selecting features from profiler.options
-  const char* features[2] = {NULL, NULL};
+  const char* features[3] = {NULL, NULL, NULL};
   uint32_t featureCount = 0;
-  features[0] = "leaf";
-  featureCount++;
+  features[featureCount++] = "js";
+#if defined(SPS_ARCH_arm)
+  // cf. the #if in mozilla_sampler_init
+  features[featureCount++] = "stackwalk";
+#else
+  features[featureCount++] = "leaf";
+#endif
   const char* threadFeature = "threads";
 
   std::ifstream infile;
