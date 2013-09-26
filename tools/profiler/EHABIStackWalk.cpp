@@ -342,8 +342,10 @@ bool EHInterp::unwind() {
 
     // 1011000: Finish
     if (insn == I_FINISH) {
-      if (mState[R_PC] == 0)
+      if (mState[R_PC] == 0) {
         mState[R_PC] = mState[R_LR];
+        mState[R_LR] = 0;
+      }
       return true;
     }
 
