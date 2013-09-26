@@ -767,6 +767,11 @@ EnsureCanEnterIon(JSContext *cx, ICUseCount_Fallback *stub, BaselineFrame *frame
 
     if (isLoopEntry) {
         IonSpew(IonSpew_BaselineOSR, "  OSR possible!");
+        if (!frame->hasPushedSPSFrame()) {
+            IonSpew(IonSpew_BaselineOSR, "   *** No SPS frame in OSR!");
+            cx->runtime()->spsProfiler.enter(cx, script, script->function());
+            frame->setPushedSPSFrame();
+        }
         IonScript *ion = script->ionScript();
         *jitcodePtr = ion->method()->raw() + ion->osrEntryOffset();
     }

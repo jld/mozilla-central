@@ -172,6 +172,11 @@ jit::EnterBaselineAtBranch(JSContext *cx, StackFrame *fp, jsbytecode *pc)
     if (cx->compartment()->debugMode())
         data.jitcode += MacroAssembler::ToggledCallSize();
 
+    if (fp->hasPushedSPSFrame()) {
+        cx->runtime()->spsProfiler.exit(cx, fp->script(), fp->script()->function());
+        fp->unsetPushedSPSFrame();
+    }
+
     data.osrFrame = fp;
     data.osrNumStackValues = fp->script()->nfixed + cx->interpreterRegs().stackDepth();
 
