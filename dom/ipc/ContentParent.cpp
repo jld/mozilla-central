@@ -1321,6 +1321,13 @@ ContentParent::ContentParent(mozIApplication* aApp,
         }
     }
 
+#ifdef MOZ_CONTENT_SANDBOX
+    // A deprivileged process will change its uid/gid/etc immediately after
+    // forking, but must sandbox itself after it's finished exec()ing and
+    // initializing; this message accomplishes that.
+    if (aOSPrivileges != base::PRIVILEGES_INHERIT)
+        SendSetProcessPrivileges(base::PRIVILEGES_INHERIT);
+#endif
 }
 
 ContentParent::~ContentParent()
