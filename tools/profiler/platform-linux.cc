@@ -468,7 +468,11 @@ static void StartSignalHandler(int signal, siginfo_t* info, void* context) {
   // TODO support selecting features from profiler.options
   const char* features[3] = {NULL, NULL, NULL};
   uint32_t featureCount = 0;
+#if defined(SPS_ARCH_arm) && defined(MOZ_WIDGET_GONK)
+  features[0] = "stackwalk";
+#else
   features[0] = "leaf";
+#endif
   featureCount++;
   features[1] = "js";
   featureCount++;
