@@ -156,6 +156,9 @@
   ALLOW_SYSCALL(access), \
   ALLOW_SYSCALL(getdents64), \
   ALLOW_SYSCALL(unlink), \
+  ALLOW_SYSCALL(mkdir), \
+  ALLOW_SYSCALL(chmod), \
+  ALLOW_SYSCALL(rename), \
   /* Should remove all of the following in the future, if possible */ \
   ALLOW_SYSCALL(getpriority), \
   ALLOW_SYSCALL(setpriority), \
