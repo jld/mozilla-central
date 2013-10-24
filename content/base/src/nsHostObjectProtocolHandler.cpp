@@ -45,6 +45,70 @@ class HostObjectURLsReporter MOZ_FINAL : public MemoryUniReporter
   }
 };
 
+class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
+{
+ public:
+  NS_DECL_ISUPPORTS
+
+  NS_IMETHOD GetName(nsACString& aName)
+  {
+    aName.AssignLiteral("blob-urls");
+    return NS_OK;
+  }
+
+  NS_IMETHOD CollectReports(nsIMemoryReporterCallback *aCallback,
+                            nsISupports *aClosure)
+  {
+    EnumArg env = { aCallback, aClosure };
+    if (gDataTable) {
+      gDataTable->EnumerateRead(EnumCallback, &env);
+    }
+    return NS_OK;
+  }
+
+ private:
+  struct EnumArg {
+    nsIMemoryReporterCallback *mCallback;
+    nsISupports *mClosure;
+  };
+  static PLDHashOperator EnumCallback(nsCStringHashKey::KeyType aKey,
+                                      DataInfo *aInfo,
+                                      void *aUserArg)
+  {
+    EnumArg *envp = static_cast<EnumArg *>(aUserArg);
+    nsIDOMBlob *blob;
+
+    aInfo->mObject->QueryInterface(NS_GET_IID(nsIDOMBlob),
+                                   reinterpret_cast<void**>(&blob));
+    if (blob) {
+      nsAutoCString path, url;
+      uint64_t size;
+
+      if (NS_FAILED(blob->GetSize(&size))) {
+        size = 0;
+      }
+
+      path = "blob-urls/0x";
+      path.AppendInt(reinterpret_cast<uintptr_t>(blob), 16);
+      path += " ";
+      url = aKey;
+      url.ReplaceChar('/', '\\');
+      path += url;
+      // TODO: Is there useful info in the principal?
+      envp->mCallback->Callback(EmptyCString(),
+                                path,
+                                KIND_OTHER,
+                                UNITS_BYTES,
+                                size,
+                                NS_LITERAL_CSTRING("Description goes here."),
+                                envp->mClosure);
+    }
+    return PL_DHASH_NEXT;
+  }
+};
+
+NS_IMPL_ISUPPORTS1(BlobURLsReporter, nsIMemoryReporter)
+
 }
 
 nsHostObjectProtocolHandler::nsHostObjectProtocolHandler()
@@ -54,6 +118,7 @@ nsHostObjectProtocolHandler::nsHostObjectProtocolHandler()
   if (!initialized) {
     initialized = true;
     NS_RegisterMemoryReporter(new mozilla::HostObjectURLsReporter());
+    NS_RegisterMemoryReporter(new mozilla::BlobURLsReporter());
   }
 }
 
