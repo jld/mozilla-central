@@ -104,7 +104,6 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
       url = aKey;
       url.ReplaceChar('/', '\\');
       path += url;
-      // TODO: Is there useful info in the principal?
       envp->mCallback->Callback(EmptyCString(),
                                 path,
                                 KIND_OTHER,
