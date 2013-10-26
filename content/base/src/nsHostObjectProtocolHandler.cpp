@@ -81,8 +81,8 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
     aInfo->mObject->QueryInterface(NS_GET_IID(nsIDOMBlob),
                                    reinterpret_cast<void**>(&blob));
     if (blob) {
-      nsAutoCString path, url;
-      char *origin;
+      nsAutoCString path, url, owner;
+      nsIURI *principalURI;
       uint64_t size;
 
       if (NS_FAILED(blob->GetSize(&size))) {
@@ -90,19 +90,17 @@ class BlobURLsReporter MOZ_FINAL : public nsIMemoryReporter
       }
 
       path = "blob-urls/";
-      if (NS_SUCCEEDED(aInfo->mPrincipal->GetOrigin(&origin))
-          && origin[0] != '\0') {
-        nsAutoCString escapedOrigin;
-
-        escapedOrigin.Assign(origin);
-        escapedOrigin.ReplaceChar('/', '\\');
-        path += escapedOrigin;
+      if (NS_SUCCEEDED(aInfo->mPrincipal->GetURI(&principalURI)) &&
+          NS_SUCCEEDED(principalURI->GetSpec(owner)) &&
+          !owner.IsEmpty()) {
+        owner.ReplaceChar('/', '\\');
+        path += owner;
       } else {
         path += "unknown origin";
       }
       path += "/0x";
       path.AppendInt(reinterpret_cast<uintptr_t>(blob), 16);
-      path += " ";
+      path += "/";
       url = aKey;
       url.ReplaceChar('/', '\\');
       path += url;
