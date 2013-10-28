@@ -10,6 +10,7 @@
 #include <sys/prctl.h>
 #include <signal.h>
 #include <string.h>
+#include <time.h>
 
 #include "mozilla/NullPtr.h"
 #include "mozilla/Util.h"
@@ -24,6 +25,12 @@
 #define FORCE_PR_LOG 1
 #endif
 #include "prlog.h"
+
+
+#define UCONTEXT_IS_FULL_OF_BEES
+typedef struct sigcontext mcontext_t;
+#include "../../tools/profiler/EHABIStackWalk.h"
+#include <pthread.h>
 
 namespace mozilla {
 #if defined(ANDROID)
@@ -61,6 +68,8 @@ struct sock_fprog seccomp_prog = {
  * @see InstallSyscallReporter() function.
  */
 #ifdef MOZ_CONTENT_SANDBOX_REPORTER
+extern "C" void DumpJSStack(void);
+
 static void
 Reporter(int nr, siginfo_t *info, void *void_context)
 {
@@ -82,6 +91,24 @@ Reporter(int nr, siginfo_t *info, void *void_context)
 
   LOG_ERROR("PID %u is missing syscall %u, arg1 %u\n", getpid(), syscall, arg1);
 
+  void *pc_array[1000];
+  void *sp_array[1000];
+  size_t count = 1000;
+  pthread_attr_t attr;
+  void *stackbot;
+  size_t stacksize;
+  
+  pthread_getattr_np(pthread_self(), &attr);
+  pthread_attr_getstack(&attr, &stackbot, &stacksize);
+  EHABIStackWalkInit();
+  count = EHABIStackWalk(ctx->uc_mcontext, (char*)stackbot + stacksize,
+                         sp_array, pc_array, count);
+  for (size_t i = 0; i < count; ++i)
+    LOG_ERROR("frame %u: sp=%p pc=%p", i, sp_array[i], pc_array[i]);
+  DumpJSStack();
+
+  struct timespec stuff = { 300, 0 };
+  nanosleep(&stuff, nullptr);
   _exit(127);
 }
 
