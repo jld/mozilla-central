@@ -156,6 +156,7 @@
   SECCOMP_WHITELIST_ARCH_LAST \
   /* restart_syscall is called internally, generally when debugging */ \
   ALLOW_SYSCALL(restart_syscall), \
+  ALLOW_SYSCALL(uname), \
   ALLOW_SYSCALL(exit_group), \
   ALLOW_SYSCALL(exit)
 
