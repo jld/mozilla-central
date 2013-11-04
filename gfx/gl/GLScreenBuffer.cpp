@@ -41,6 +41,12 @@ GLScreenBuffer::Create(GLContext* gl,
     if (!factory &&
         XRE_GetProcessType() != GeckoProcessType_Default)
     {
+        // bug 933336 - we got crashes when we tried to allocate surfaces
+        // and we didn't have a surfaceAllocator.
+        if (!caps.surfaceAllocator) {
+            printf_stderr("bjacob's magic patch saved the day\n");
+            return nullptr;
+        }
         factory = new SurfaceFactory_Gralloc(gl, caps);
     }
 #endif
