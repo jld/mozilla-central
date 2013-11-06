@@ -139,6 +139,10 @@ void main(void) {
     gl.drawElements(gl.POINTS, 1, indexType, 2*indexStride);
     elemTestFunc(!isScreenBlack(), '[' + info + '] drawElements[huge offset] should color pixels.');
 
+    if (DriverInfo.GetOS() == DriverInfo.OS.B2G) {
+      // B2G may or may not support WebGL
+      elemTestFunc = function() { };
+    }
     checkGLError(elemTestFunc, info);
   }
 
