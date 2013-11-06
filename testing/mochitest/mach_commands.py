@@ -98,7 +98,9 @@ class MochitestRunner(MozbuildObject):
         self.tests_dir = os.path.join(self.topobjdir, '_tests')
         self.mochitest_dir = os.path.join(self.tests_dir, 'testing', 'mochitest')
 
-    def run_b2g_test(self, test_file=None, b2g_home=None, xre_path=None, **kwargs):
+    def run_b2g_test(self, test_file=None, b2g_home=None, xre_path=None,
+                     total_chunks=None, this_chunk=None, no_window=None,
+                     **kwargs):
         """Runs a b2g mochitest.
 
         test_file is a path to a test file. It can be a relative path from the
@@ -143,6 +145,9 @@ class MochitestRunner(MozbuildObject):
 
         for k, v in kwargs.iteritems():
             setattr(options, k, v)
+        options.noWindow = no_window
+        options.totalChunks = total_chunks
+        options.thisChunk = this_chunk
 
         options.consoleLevel = 'INFO'
         if conditions.is_b2g_desktop(self):
