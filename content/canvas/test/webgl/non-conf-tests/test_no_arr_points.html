@@ -139,6 +139,13 @@ void main(void) {
     gl.drawElements(gl.POINTS, 1, indexType, 2*indexStride);
     elemTestFunc(!isScreenBlack(), '[' + info + '] drawElements[huge offset] should color pixels.');
 
+    if (DriverInfo.getOS() == DriverInfo.OS.B2G) {
+      // Bug 936312: The B2G emulator, on at least some underlying
+      // hardware, seems to report success but not actually draw anything.
+      // On other hardware (e.g., TBPL) it doesn't support WebGL at all, in
+      // which case this is never reached.
+      elemTestFunc = ok;
+    }
     checkGLError(elemTestFunc, info);
   }
 
