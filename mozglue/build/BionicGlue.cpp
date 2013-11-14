@@ -128,7 +128,8 @@ WRAP(fork)(void)
 extern "C" NS_EXPORT int
 WRAP(raise)(int sig)
 {
-  return pthread_kill(pthread_self(), sig);
+  extern int tkill(int tid, int sig);
+  return tkill(gettid(), sig);
 }
 
 /*
