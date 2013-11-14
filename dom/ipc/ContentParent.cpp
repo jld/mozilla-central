@@ -1474,12 +1474,6 @@ ContentParent::ContentParent(mozIApplication* aApp,
             KillHard();
         }
     }
-    if (mSubprocess->GetChildProcessHandle() & 256) {
-        printf_stderr("KILLING %d", mSubprocess->GetChildProcessHandle());
-        KillHard();
-    } else {
-        printf_stderr("NOT KILLING %d", mSubprocess->GetChildProcessHandle());
-    }
 #endif
 }
 
