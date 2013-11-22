@@ -14,9 +14,7 @@
 #define mozilla_EHABIStackWalk_h__
 
 #include <stddef.h>
-#ifndef UCONTEXT_IS_FULL_OF_BEES
 #include <ucontext.h>
-#endif
 
 namespace mozilla {
 
