@@ -49,6 +49,8 @@
 /* Architecture-specific very infrequently used syscalls */
 #if defined(__arm__)
 #define SECCOMP_WHITELIST_ARCH_LAST \
+  ALLOW_SYSCALL(sigaction), \
+  ALLOW_SYSCALL(rt_sigaction), \
   ALLOW_ARM_SYSCALL(breakpoint), \
   ALLOW_ARM_SYSCALL(cacheflush), \
   ALLOW_ARM_SYSCALL(usr26), \
@@ -60,18 +62,10 @@
 
 /* System calls used by the profiler */
 #ifdef MOZ_PROFILING
-# ifdef __NR_sigaction
-#  define SECCOMP_WHITELIST_PROFILING \
-  ALLOW_SYSCALL(sigaction), \
-  ALLOW_SYSCALL(rt_sigaction), \
+#define SECCOMP_WHITELIST_PROFILING \
   ALLOW_SYSCALL(tgkill),
-# else
-#  define SECCOMP_WHITELIST_PROFILING \
-  ALLOW_SYSCALL(rt_sigaction), \
-  ALLOW_SYSCALL(tgkill),
-# endif
 #else
-# define SECCOMP_WHITELIST_PROFILING
+#define SECCOMP_WHITELIST_PROFILING
 #endif
 
 /* Architecture-specific syscalls that should eventually be removed */
@@ -143,7 +137,6 @@
   ALLOW_SYSCALL(prctl), \
   ALLOW_SYSCALL(access), \
   ALLOW_SYSCALL(getdents64), \
-  ALLOW_SYSCALL(unlink), \
   ALLOW_SYSCALL(fsync), \
   ALLOW_SYSCALL(socketpair), \
   ALLOW_SYSCALL(sendmsg), \
